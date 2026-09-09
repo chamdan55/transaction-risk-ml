@@ -1,0 +1,93 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "transaction-risk-ml"
+version = "0.1.0"
+description = "End-to-end machine learning platform for transaction risk scoring"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+authors = [
+    { name = "Chamdan L Abdulbaaqiy" }
+]
+
+dependencies = [
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.34,<1.0",
+    "pydantic>=2.10,<3.0",
+    "pydantic-settings>=2.7,<3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9.0",
+    "httpx>=0.28,<1.0",
+    "ruff>=0.9,<1.0",
+    "pre-commit>=4.0,<5.0",
+]
+
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "B",
+    "UP",
+]
+
+ignore = [
+    "E501",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+
+markers = [
+    "unit: unit tests",
+    "integration: integration tests",
+    "model: machine learning model tests",
+]
+
+
+[tool.coverage.run]
+source = ["app", "ml"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+]
