@@ -1,4 +1,4 @@
-.PHONY: install test lint format format-check pre-commit run
+.PHONY: install test lint-fix lint format format-check pre-commit run
 
 install:
 	python -m pip install --upgrade pip
@@ -6,6 +6,9 @@ install:
 
 test:
 	pytest
+
+lint-fix:
+	ruff check . --fix
 
 lint:
 	ruff check .

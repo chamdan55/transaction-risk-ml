@@ -4,6 +4,7 @@ from pyspark.sql.types import (
     StringType,
     StructField,
     StructType,
+    TimestampType,
 )
 
 PAYSIM_SCHEMA = StructType(
@@ -19,5 +20,21 @@ PAYSIM_SCHEMA = StructType(
         StructField("newbalanceDest", DoubleType(), nullable=False),
         StructField("isFraud", IntegerType(), nullable=False),
         StructField("isFlaggedFraud", IntegerType(), nullable=False),
+    ]
+)
+CANONICAL_TRANSACTION_SCHEMA = StructType(
+    [
+        StructField("transaction_id", StringType(), nullable=False),
+        StructField("timestamp", TimestampType(), nullable=False),
+        StructField("transaction_type", StringType(), nullable=False),
+        StructField("origin_account_id", StringType(), nullable=False),
+        StructField("destination_account_id", StringType(), nullable=False),
+        StructField("amount", DoubleType(), nullable=False),
+        StructField("origin_balance_before", DoubleType(), nullable=False),
+        StructField("origin_balance_after", DoubleType(), nullable=False),
+        StructField("destination_balance_before", DoubleType(), nullable=False),
+        StructField("destination_balance_after", DoubleType(), nullable=False),
+        StructField("is_fraud", IntegerType(), nullable=False),
+        StructField("is_flagged_fraud", IntegerType(), nullable=False),
     ]
 )
