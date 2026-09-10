@@ -1,4 +1,4 @@
-# Sprint 1 — Transaction Data Engineering Design
+# Sprint 1 — Transaction Data Engineering Pipeline Design
 
 ## 1. Objective
 

@@ -44,22 +44,22 @@
 - [x] format check passed
 
 ## Step 2 — PySpark Ingestion + Schema Validation
-- [ ] ml/data/schema.py
-- [ ] ml/data/spark.py
-- [ ] ml/data/ingestion.py
-- [ ] ml/data/validation.py
-- [ ] pipelines/validate_paysim.py
-- [ ] Explicit Spark schema
-- [ ] PySpark berhasil membaca PaySim
-- [ ] Schema berhasil diverifikasi
-- [ ] Null validation
-- [ ] Amount validation
-- [ ] Fraud label validation
-- [ ] Step validation
-- [ ] ValidationResult
-- [ ] Unit test valid dataset
-- [ ] Unit test invalid dataset
-- [ ] pytest PASS
-- [ ] ruff PASS
-- [ ] format check PASS
-- [ ] pre-commit PASS
+- [x] ml/data/schema.py
+- [x] ml/data/spark.py
+- [x] ml/data/ingestion.py
+- [x] ml/data/validation.py
+- [x] pipelines/validate_paysim.py
+- [x] Explicit Spark schema
+- [x] PySpark berhasil membaca PaySim
+- [x] Schema berhasil diverifikasi
+- [x] Null validation
+- [x] Amount validation
+- [x] Fraud label validation
+- [x] Step validation
+- [x] ValidationResult
+- [x] Unit test valid dataset
+- [x] Unit test invalid dataset
+- [x] pytest PASS
+- [x] ruff PASS
+- [x] format check PASS
+- [x] pre-commit PASS

@@ -1,16 +1,18 @@
 Nama kerja project:
 
-Transaction Risk Scoring — End-to-End ML Platform
+> Transaction Risk Scoring — End-to-End ML Platform
 
 Tujuan akhirnya:
 
-Build, deploy, monitor, and continuously improve a production-ready machine learning system for transaction risk scoring.
+> Build, deploy, monitor, and continuously improve a production-ready machine learning system for transaction risk scoring.
 
 Fokus utamanya adalah membuktikan end-to-end ML lifecycle tanpa cloud.
 
-1. High-Level Architecture
+---
 
+# 1. High-Level Architecture (init)
 Arsitektur final yang saya rekomendasikan:
+```
 
                            ┌──────────────────────┐
                            │       GitHub         │
@@ -79,65 +81,72 @@ Arsitektur final yang saya rekomendasikan:
                                             │ Experiment +      │
                                             │ Model Registry    │
                                             └───────────────────┘
-
+```
 Ada empat subsystem utama:
 
 ML Pipeline
 Model Serving
 ML Monitoring
 MLOps Automation
-2. Final Tech Stack
+
+---
+
+# 2. Final Tech Stack
 
 Saya sarankan kita tidak menambahkan teknologi hanya supaya terlihat banyak.
 
 Final stack:
 
-Layer	Technology	Purpose
-Language	Python 3.12	Core language
-Data processing	Pandas	Data preparation
-ML	scikit-learn	Baseline + preprocessing
-ML	XGBoost	Main production model
-Data validation	Pandera	Dataset/schema validation
-Experiment tracking	MLflow	Experiments + metrics
-Model registry	MLflow	Model versioning
-API	FastAPI	Model serving
-API schema	Pydantic	Request/response validation
-Testing	Pytest	Unit/integration/model tests
-Code quality	Ruff	Linting + formatting
-Container	Docker	Packaging
-Orchestration	Kubernetes	Deployment
-Local Kubernetes	kind	Local cluster
-System monitoring	Prometheus	Metrics
-Dashboard	Grafana	Visualization
-ML monitoring	Evidently	Drift/data/model monitoring
-CI/CD	GitHub Actions	Automation
-Version control	Git + GitHub	Source control
-Storage	PostgreSQL	Metadata / application data
-Artifact storage	Local filesystem / Docker volume	Model/artifacts
-Yang sengaja tidak kita gunakan
+| Layer	| Technology | Purpose |
+| :--- | :---: | ---: |
+| Language | Python 3.12 | Core language |
+| Data processing | Pandas | Data preparation |
+| ML | scikit-learn | Baseline + preprocessing |
+| ML | XGBoost | Main production model |
+| Data validation | Pandera | Dataset/schema validation |
+| Experiment tracking | MLflow | Experiments + metrics |
+| Model registry | MLflow | Model versioning |
+| API | FastAPI | Model serving |
+| API schema | Pydantic | Request/response validation |
+| Testing | Pytest | Unit/integration/model tests |
+| Code quality | Ruff | Linting + formatting |
+| Container | Docker | Packaging |
+| Orchestration | Kubernetes | Deployment |
+| Local Kubernetes | kind | Local cluster
+| System monitoring | Prometheus | Metrics |
+| Dashboard | Grafana | Visualization |
+| ML monitoring | Evidently | Drift/data/model monitoring |
+| CI/CD | GitHub Actions | Automation |
+| Version control | Git + GitHub | Source control |
+| Storage | PostgreSQL | Metadata / application data |
+| Artifact storage | Local filesystem / Docker volume | Model/artifacts |
+| --- | --- | --- |
+
+**Yang sengaja tidak kita gunakan**
 
 Untuk menjaga scope:
+- AWS
+- Azure
+- GCP
+- Kafka
+- Spark
+- Airflow
+- Kubeflow
+- Terraform
+- MLflow alternatives
+- LangChain
+- LLM
 
-AWS
-Azure
-GCP
-Kafka
-Spark
-Airflow
-Kubeflow
-Terraform
-MLflow alternatives
-LangChain
-LLM
+__Bukan karena teknologi tersebut tidak bagus__, tetapi karena mereka tidak diperlukan untuk membuktikan objective project.
 
-Bukan karena teknologi tersebut tidak bagus, tetapi karena mereka tidak diperlukan untuk membuktikan objective project.
+---
 
-3. Kenapa XGBoost?
+# 3. Kenapa XGBoost?
 
-Saya pilih XGBoost sebagai production model, dengan scikit-learn sebagai baseline.
+Saya pilih __XGBoost sebagai production model__, dengan scikit-learn sebagai baseline.
 
 Strukturnya:
-
+```
 Baseline
    │
    ├── Logistic Regression
@@ -149,45 +158,66 @@ Baseline
           │
           ▼
    Production Candidate
-
+```
 Ini memberikan cerita yang bagus:
-
+```
 Baseline → experimentation → model comparison → production candidate.
-
+```
 Dan XGBoost sangat masuk akal untuk dataset tabular seperti transaction risk.
 
-4. Data Layer
+---
+
+# 4. Data Layer
 
 Kita gunakan dataset publik atau synthetic transaction dataset.
 
 Saya lebih suka pendekatan:
 
-Training data
+**Training data**
+```
 data/
 ├── raw/
 ├── processed/
 └── reference/
+```
 
-Pipeline:
+**Pipeline:**
+```
+                    ┌──────────────────┐
+                    │   Raw Transaction│
+                    │       Data       │
+                    └────────┬─────────┘
+                             │
+                             ▼
+                    ┌──────────────────┐
+                    │     PySpark      │
+                    │                  │
+                    │ Validation       │
+                    │ Cleaning         │
+                    │ Transformation   │
+                    │ Aggregation      │
+                    │ Feature Eng.     │
+                    └────────┬─────────┘
+                             │
+                             ▼
+                       Parquet Dataset
+                             │
+                             ▼
+                    Train / Validation
+                           / Test
+                             │
+                             ▼
+                  ┌─────────────────────┐
+                  │ scikit-learn /      │
+                  │ XGBoost             │
+                  └──────────┬──────────┘
+                             │
+                             ▼
+                          MLflow
+```
 
-Raw CSV
-   │
-   ▼
-Schema Validation
-   │
-   ▼
-Data Cleaning
-   │
-   ▼
-Feature Engineering
-   │
-   ▼
-Processed Dataset
-   │
-   ├── train
-   ├── validation
-   └── test
 Contoh feature
+```
 transaction_amount
 transaction_hour
 transaction_day
@@ -198,16 +228,20 @@ account_age
 previous_transaction_amount
 device_change
 international_transaction
+```
 
-Target:
+__Target:__
 
-is_risky
-5. Data Validation
+```is_risky```
 
-Kita akan menggunakan Pandera.
+---
+
+# 5. Data Validation
+
+Kita akan menggunakan __Pandera__.
 
 Misalnya:
-
+```
 transaction_amount
 → numeric
 → >= 0
@@ -222,17 +256,20 @@ merchant_category
 
 is_risky
 → 0 / 1
+```
 
 Ini penting karena requirement vacancy menyebut:
 
-data governance, security, and best engineering practices
+```data governance, security, and best engineering practices```
 
 Data validation adalah salah satu bentuk engineering discipline yang konkret.
 
-6. ML Training Architecture
+---
 
-Training pipeline:
+# 6. ML Training Architecture
 
+**Training pipeline:**
+```
                  ┌─────────────┐
                  │ Raw Dataset │
                  └──────┬──────┘
@@ -270,12 +307,16 @@ Training pipeline:
                         │
                         ▼
                  Model Registry
-7. MLflow Architecture
+```
+
+---
+
+# 7. MLflow Architecture
 
 MLflow menjadi pusat experiment tracking.
 
 Misalnya:
-
+```
 Experiment:
 transaction-risk-classification
 
@@ -298,9 +339,9 @@ Run 003
 ├── learning_rate = 0.05
 ├── F1 = 0.88
 └── ROC-AUC = 0.94
-
+```
 Kemudian:
-
+```
 MLflow Model Registry
 
 transaction-risk-model
@@ -308,12 +349,15 @@ transaction-risk-model
 v1 → Production
 v2 → Staging
 v3 → Candidate
+```
+Ini akan menjadi salah satu bukti utama bahwa kamu memahami __model lifecycle.__
 
-Ini akan menjadi salah satu bukti utama bahwa kamu memahami model lifecycle.
+---
 
-8. Model Serving
+# 8. Model Serving
 
 Model production disajikan melalui FastAPI.
+```
 
                     Client
                       │
@@ -337,9 +381,9 @@ Model production disajikan melalui FastAPI.
                       │
                       ▼
                   Prediction
-
+```
 Response:
-
+```
 {
   "prediction": 1,
   "risk_score": 0.91,
@@ -347,21 +391,27 @@ Response:
   "model_name": "transaction-risk-model",
   "model_version": "3"
 }
-9. API Design
+```
+
+---
+
+# 9. API Design
 
 Minimal endpoint:
 
+```
 POST /predict
+```
 
 Operational endpoints:
-
+```
 GET /health
 GET /ready
 GET /model/info
 GET /metrics
-
+```
 Contoh:
-
+```
 GET /model/info
 
 {
@@ -371,15 +421,17 @@ GET /model/info
   "trained_at": "2026-09-08",
   "status": "production"
 }
-
-Ini membuat model serving terasa seperti production backend service.
+```
+Ini membuat model serving terasa seperti **production backend service.**
 
 Dan ini sangat sesuai dengan pengalamanmu di FastAPI.
 
-10. Kubernetes Architecture
+---
+
+# 10. Kubernetes Architecture
 
 Di Kubernetes kita tidak perlu membuat cluster yang kompleks.
-
+```
 Kubernetes Cluster
 │
 ├── namespace: ml-platform
@@ -396,13 +448,13 @@ Kubernetes Cluster
 └── mlflow
     ├── Deployment
     └── Service
-
+```
 Untuk local development:
 
-kind
+> kind
 
 Jadi:
-
+```
 Docker image
        ↓
 kind cluster
@@ -410,14 +462,17 @@ kind cluster
 Kubernetes Deployment
        ↓
 FastAPI Pod
-
+```
 Ini cukup untuk membuktikan orchestration skill.
 
-11. Monitoring Architecture
+---
+
+# 11. Monitoring Architecture
 
 Kita sengaja pisahkan:
 
-System monitoring
+### System monitoring
+```
 FastAPI
    │
    ▼
@@ -425,17 +480,19 @@ Prometheus
    │
    ▼
 Grafana
+```
 
 Metrics:
-
+```
 request_count
 request_latency
 error_count
 prediction_count
 HTTP status
+```
 
 Dashboard:
-
+```
 ┌────────────────────────────────────┐
 │ Transaction Risk API               │
 ├────────────────────────────────────┤
@@ -446,15 +503,19 @@ Dashboard:
 ├────────────────────────────────────┤
 │ Prediction Distribution            │
 │ LOW        ███████████  71%        │
-│ MEDIUM     ████          19%        │
+│ MEDIUM     ████          19%       │
 │ HIGH       ██            10%       │
 └────────────────────────────────────┘
-12. ML Monitoring
+```
+
+---
+
+# 12. ML Monitoring
 
 System monitoring ≠ ML monitoring.
 
 Kita buat pipeline terpisah:
-
+```
 Prediction Logs
       │
       ▼
@@ -464,9 +525,9 @@ Evidently
       ├── Prediction Drift
       ├── Data Quality
       └── Model Performance
-
+```
 Contohnya:
-
+```
 Feature                  Drift
 ────────────────────────────────
 transaction_amount       42%
@@ -475,10 +536,14 @@ merchant_category        18%
 location_distance        27%
 
 Overall Drift: DETECTED
-13. Retraining Architecture
+```
+
+---
+
+# 13. Retraining Architecture
 
 Ini bagian yang akan membuat project jauh lebih kuat.
-
+```
                Production Data
                       │
                       ▼
@@ -515,17 +580,20 @@ Ini bagian yang akan membuat project jauh lebih kuat.
                   │
                   ▼
               Production
+```
 
 Dengan demikian kita punya:
 
-training → deployment → monitoring → retraining → redeployment
+> training → deployment → monitoring → retraining → redeployment
 
 Ini benar-benar mencakup lifecycle yang diminta vacancy.
 
-14. CI/CD Architecture
+---
+
+# 14. CI/CD Architecture
 
 GitHub Actions:
-
+```
 Developer
     │
     ▼
@@ -550,20 +618,25 @@ Container Test
     │
     ▼
 Kubernetes Deployment
-
+```
 Untuk tahap awal kita bisa melakukan deployment ke local kind cluster dari CI secara terbatas atau menggunakan CI untuk build/test saja dan deployment secara lokal.
 
-Saya lebih menyarankan CI terlebih dahulu, CD kemudian, supaya tidak over-engineer.
+Saya lebih menyarankan __CI terlebih dahulu, CD kemudian,__ supaya tidak over-engineer.
 
-15. Testing Strategy
+---
+
+# 15. Testing Strategy
 
 Ini juga jangan dilewatkan.
 
-Unit test
+### Unit test
+```
 test_feature_engineering()
 test_data_validation()
 test_prediction()
-Integration test
+```
+### Integration test
+```
 API
  ↓
 Preprocessing
@@ -571,14 +644,17 @@ Preprocessing
 Model
  ↓
 Response
-Model test
+```
 
+### Model test
 Contohnya:
-
+```
 model F1 >= baseline
 recall >= minimum threshold
 prediction schema valid
-API test
+```
+### API test
+```
 POST /predict
 → 200
 
@@ -587,13 +663,15 @@ Invalid request
 
 Model unavailable
 → 503
+```
+Jadi ML project-nya punya __software engineering discipline.__
 
-Jadi ML project-nya punya software engineering discipline.
+---
 
-16. Repository Architecture Final
+# 16. Repository Architecture Final
 
 Saya akan sedikit memperbaiki struktur repository sebelumnya supaya separation of concerns lebih jelas:
-
+```
 transaction-risk-ml/
 │
 ├── app/
@@ -679,17 +757,19 @@ transaction-risk-ml/
 ├── docker-compose.yml
 ├── Makefile
 └── README.md
-
-Notebook hanya untuk exploration/visualization.
+```
+Notebook __hanya untuk exploration/visualization.__
 
 Production logic tidak boleh berada di notebook.
 
 Ini poin kecil tetapi penting untuk menunjukkan engineering maturity.
 
-17. Development Environment
+---
+
+# 17. Development Environment
 
 Untuk development sehari-hari:
-
+```
 Windows
    │
    ├── Python
@@ -700,35 +780,38 @@ Windows
           │
           ▼
     Kubernetes cluster
-
+```
 Local services:
-
+```
 localhost
 │
 ├── FastAPI
 ├── MLflow
 ├── Prometheus
 └── Grafana
-
+```
 Semuanya dapat dijalankan dengan:
-
-make up
-
+```
+    make up
+```
 dan dihentikan dengan:
-
-make down
-
+```
+    make down
+```
 Jadi project mudah direproduksi oleh recruiter/engineer lain.
 
-18. Architecture Principles
+---
+
+# 18. Architecture Principles
 
 Saya ingin kita menetapkan beberapa prinsip dari awal.
 
-1. Reproducibility
-
+### 1. Reproducibility
+```
 Training yang sama → environment + data + config yang sama → hasil yang dapat direproduksi.
-
-2. Separation of concerns
+```
+### 2. Separation of concerns
+```
 Data
 ≠
 Training
@@ -736,29 +819,31 @@ Training
 Inference
 ≠
 Monitoring
-3. Configuration-driven
+```
+### 3. Configuration-driven
 
 Hyperparameter tidak hard-coded di banyak tempat.
 
 Misalnya:
-
+```
 configs/model.yaml
-4. Testability
+```
+### 4. Testability
 
 Semua komponen penting harus bisa dites tanpa menjalankan keseluruhan platform.
 
-5. Observability
+### 5. Observability
 
-Production model tidak boleh dianggap selesai hanya karena endpoint /predict berhasil.
+Production model tidak boleh dianggap selesai hanya karena endpoint ```/predict``` berhasil.
 
-6. Model promotion harus berdasarkan metric
+### 6. Model promotion harus berdasarkan metric
 
 Bukan:
-
+```
 model baru → otomatis production.
-
+```
 Tetapi:
-
+```
 Candidate
     ↓
 Evaluation
@@ -766,10 +851,12 @@ Evaluation
 Quality Gate
     ↓
 Promotion
-19. Mapping ke Requirement Vacancy
+```
+
+# 19. Mapping ke Requirement Vacancy
 
 Kalau kita selesai sampai architecture ini, mapping-nya sangat kuat:
-
+```
 "Design, develop, deploy ML models"
              ↓
         XGBoost + FastAPI
@@ -827,15 +914,15 @@ Data → Train → Evaluate → Deploy
 "Software engineering"
              ↓
 Pytest + Ruff + Git + CI/CD
-
+```
 Dan yang paling penting:
 
-Requirement yang menjadi hero feature project ini:
-
+### Requirement yang menjadi hero feature project ini:
+```
 Understanding of the end-to-end machine learning lifecycle, including data preparation, model development, evaluation, deployment, and monitoring
-
+```
 Kita bahkan akan membuat lifecycle itu terlihat jelas di README:
-
+```
              END-TO-END ML LIFECYCLE
 
        ┌──────────────────────┐
@@ -863,40 +950,80 @@ Kita bahkan akan membuat lifecycle itu terlihat jelas di README:
        └──────────┬───────────┘
                   │
                   └──────→ back to 2
-20. Scope final yang saya sarankan
+```
 
-Saya akan menetapkan MVP → Production-like → Advanced supaya kita tidak terjebak over-engineering.
+---
 
-MVP
-Dataset
-Data validation
-Feature engineering
-Baseline models
-XGBoost
-Evaluation
+# 20. Scope final yang saya sarankan
+
+Saya akan menetapkan **MVP → Production-like → Advanced supaya kita tidak terjebak over-engineering.**
+
+### MVP
+- Dataset
+- Data validation
+- Feature engineering
+- Baseline models
+- XGBoost
+- Evaluation
+- Lflow
+- FastAPI
+- Docker
+
+### Production-like
+- Kubernetes
+- Pytest
+- CI
+- Prometheus
+- Grafana
+- Evidently
+- Model registry
+- Model versioning
+
+### Advanced
+- Automated drift detection
+- Automated retraining
+- Model quality gate
+- Automated model promotion
+- CD
+- Load testing
+- Failure/recovery testing
+
+---
+
+# 21. Project Success Criteria
+
+Project dianggap berhasil kalau kita bisa mendemonstrasikan:
+```
+Raw Data
+   ↓
+PySpark Data Pipeline
+   ↓
+Feature Dataset
+   ↓
+ML Training
+   ↓
+Model Evaluation
+   ↓
 MLflow
+   ↓
+Model Registry
+   ↓
 FastAPI
+   ↓
 Docker
-Production-like
+   ↓
 Kubernetes
-Pytest
-CI
-Prometheus
-Grafana
+   ↓
+Prometheus/Grafana
+   ↓
 Evidently
-Model registry
-Model versioning
-Advanced
-Automated drift detection
-Automated retraining
-Model quality gate
-Automated model promotion
-CD
-Load testing
-Failure/recovery testing
+   ↓
+Drift Detection
+   ↓
+Retraining
+   ↓
+Model Promotion
+```
+Ini menjadi Definition of Done tingkat project.
 
-Saya menyarankan kita berhenti menambah teknologi setelah Advanced scope ini. Dengan itu project sudah cukup besar untuk menunjukkan kemampuan MLE secara serius, tetapi masih realistis untuk dikerjakan seorang diri.
-
-Dan ada satu keputusan arsitektur yang menurut saya penting: jangan mulai dari Kubernetes/MLflow dulu. Kita mulai dari ML lifecycle yang benar, lalu setiap layer infrastructure ditambahkan untuk menyelesaikan masalah nyata. Dengan begitu, saat interview kamu bisa menjelaskan mengapa setiap komponen ada, bukan sekadar menyebut daftar tools.
-
-Langkah berikutnya paling logis adalah membuat Project Specification v1: problem statement, dataset, data schema, feature definitions, target variable, success metrics, ML experiment plan, API contract, monitoring metrics, dan Definition of Done untuk setiap sprint.
+---
