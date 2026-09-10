@@ -63,3 +63,17 @@
 - [x] ruff PASS
 - [x] format check PASS
 - [x] pre-commit PASS
+
+## Step 3: Canonical Transaction Transformation.
+- [x] ml/data/transformation.py
+- [x] Canonical schema defined
+- [x] PaySim → canonical mapping
+- [x] Deterministic transaction_id
+- [x] step → timestamp
+- [x] YAML config digunakan
+- [x] Canonical data ditulis sebagai Parquet
+- [x] Transformation unit tests
+- [x] make lint
+- [x] make test
+- [x] Pipeline berhasil dengan full PaySim dataset
+- [x] data/processed/ tidak masuk Git
