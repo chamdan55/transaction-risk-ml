@@ -1,7 +1,10 @@
 import logging
 
 from ml.data.spark import create_spark_session
-from ml.data.validation import validate_canonical_data
+from ml.data.validation import (
+    validate_canonical_data,
+    validate_transaction_domain,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +34,15 @@ def main() -> None:
             raise ValueError(f"Canonical dataset validation failed: {result}")
 
         logger.info("Canonical dataset validation passed")
+
+        logger.info("Running domain validation")
+
+        domain_result = validate_transaction_domain(df)
+
+        logger.info(
+            "Transaction domain validation result: %s",
+            domain_result,
+        )
 
     finally:
         spark.stop()

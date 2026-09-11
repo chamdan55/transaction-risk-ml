@@ -4,6 +4,11 @@ from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
 from ml.data.constants import VALID_TRANSACTION_TYPES
+from ml.data.domain_rules import (
+    build_destination_balance_inconsistency_condition,
+    build_negative_balance_condition,
+    build_origin_balance_inconsistency_condition,
+)
 from ml.data.schema import CANONICAL_TRANSACTION_SCHEMA
 
 
@@ -30,6 +35,13 @@ class CanonicalValidationResult:
     invalid_fraud_label_count: int
     invalid_flagged_fraud_count: int
     invalid_transaction_type_count: int
+
+
+@dataclass(frozen=True)
+class DomainValidationResult:
+    negative_balance_count: int
+    origin_balance_mismatch_count: int
+    destination_balance_mismatch_count: int
 
 
 def validate_paysim(df: DataFrame) -> ValidationResult:
@@ -187,4 +199,26 @@ def validate_canonical_data(df: DataFrame) -> CanonicalValidationResult:
         invalid_fraud_label_count=invalid_fraud_label_count,
         invalid_flagged_fraud_count=invalid_flagged_fraud_count,
         invalid_transaction_type_count=invalid_transaction_type_count,
+    )
+
+
+def validate_transaction_domain(
+    df: DataFrame,
+) -> DomainValidationResult:
+    validate_canonical_schema(df)
+
+    negative_balance_count = df.filter(build_negative_balance_condition()).count()
+
+    inconsistent_origin_balance_count = df.filter(
+        build_origin_balance_inconsistency_condition()
+    ).count()
+
+    inconsistent_destination_balance_count = df.filter(
+        build_destination_balance_inconsistency_condition()
+    ).count()
+
+    return DomainValidationResult(
+        negative_balance_count=negative_balance_count,
+        origin_balance_mismatch_count=inconsistent_origin_balance_count,
+        destination_balance_mismatch_count=inconsistent_destination_balance_count,
     )

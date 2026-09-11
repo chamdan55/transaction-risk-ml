@@ -79,15 +79,15 @@
 - [✓] data/processed/ tidak masuk Git
 
 ## Step 4: Data Quality Validation & Canonical Dataset Verification
-- [ ] canonical Parquet dapat dibaca kembali
-- [ ] schema valid
-- [ ] row count = 6,362,620
-- [ ] required fields tidak NULL
-- [ ] transaction_id valid dan unique
-- [ ] timestamp valid
-- [ ] amount valid
-- [ ] fraud labels valid
-- [ ] fraud distribution berhasil dihitung
-- [ ] automated tests pass
-- [ ] Ruff pass
-- [ ] pipeline validation berhasil
+- [x] canonical Parquet dapat dibaca kembali
+- [x] schema valid
+- [x] row count = 6,362,620
+- [x] required fields tidak NULL
+- [x] transaction_id valid dan unique
+- [x] timestamp valid
+- [x] amount valid
+- [x] fraud labels valid
+- [x] fraud distribution berhasil dihitung
+- [x] automated tests pass
+- [x] Ruff pass
+- [x] pipeline validation berhasil

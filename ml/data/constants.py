@@ -9,3 +9,4 @@ VALID_TRANSACTION_TYPES = frozenset(
 )
 
 VALID_BINARY_LABELS = frozenset({0, 1})
+BALANCE_TOLERANCE = 1e-6
