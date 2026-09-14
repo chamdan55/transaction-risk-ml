@@ -1518,7 +1518,7 @@ Sprint 1 is complete when:
 - [ ✓ ]  Integration test exists
 - [ ✓ ]  Ruff passes
 - [ ✓ ]  Pytest passes
-- [ ] GitHub Actions remains green
+- [ ✓ ] GitHub Actions remains green
 - [ ✓ ]  Pipeline can be reproduced from configuration
 
 ---
