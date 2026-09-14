@@ -462,6 +462,23 @@ destination_amount_avg
 
 These features help capture unusual behavior around destination accounts.
 
+## 10.5 Step 5 initial behavioral features
+
+The initial Step 5 implementation includes four historical account-behavior
+features:
+
+```text
+transactions_last_1h
+transactions_last_24h
+amount_sum_last_24h
+unique_destinations_last_30d
+```
+
+These features are calculated with PySpark range windows partitioned by
+`origin_account_id` and ordered by `timestamp`. The window ends strictly
+before the current transaction, so the current row and future rows cannot
+contribute to its own behavioral features.
+
 ---
 
 # 11. Spark Window Strategy
@@ -769,118 +786,486 @@ transaction-risk-ml/
 
 # 19. Sprint 1 Implementation Breakdown
 
-## Step 1 — Add data dependencies
+## Step 5: Feature Engineering
+### __Objective__
+Mengubah canonical transaction dataset:
 
-Expected dependencies:
+> data/processed/canonical/
 
-```text
-pyspark
-pandas
-pyarrow
-pandera
-pyyaml
+menjadi feature dataset yang siap digunakan untuk:
 ```
+                 Canonical Transactions
+                         │
+                         ▼
+                Feature Engineering
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+     Amount Features  Balance Features  Transaction
+                                        Behavior
+          │              │              │
+          └──────────────┼──────────────┘
+                         ▼
+                  Feature Dataset
+                         │
+                         ▼
+                  Model Training
+```
+### __Prinsip utama__
 
-Pandas is retained primarily for EDA/small samples; PySpark is the main processing engine.
+Kita akan menghindari feature yang menyebabkan data leakage.
+
+Karena target kita adalah __`is_fraud`__, feature engineering hanya boleh menggunakan informasi yang secara logis tersedia pada atau sebelum transaksi tersebut diproses.
 
 ---
+### Step 5.1 — Tentukan Feature Contract
 
-## Step 2 — Acquire raw dataset
+Sebelum coding, kita define dulu feature yang akan kita hasilkan.
 
-Place the source file under:
+Aku menyarankan initial feature set berikut.
 
-```text
-data/raw/
+#### __A. Transaction features__
+| Feature | Deskripsi |
+| :--- | ---: |
+| `amount` | Nilai transaksi |
+|`amount_log` | __`log1p(amount)`__ |
+|`transaction_type` | Tipe transaksi |
+|`is_cash_in` | Indicator `CASH_IN` |
+|`is_cash_out` | Indicator `CASH_OUT` |
+|`is_debit` | Indicator `DEBIT` |
+|`is_payment` | Indicator `PAYMENT` |
+|`is_transfer` | Indicator `TRANSFER` |
+
+#### __B. Origin balance features__
+| Feature | Deskripsi |
+| :--- | ---: |
+|`origin_balance_before` | Saldo sebelum transaksi
+|`origin_balance_after` | Saldo setelah transaksi
+|`origin_balance_delta` | `after - before`
+|`origin_balance_change_ratio` | Perubahan relatif terhadap saldo awal
+|`amount_to_origin_balance_ratio` | Amount dibanding saldo awal
+
+Contoh:
+
+> origin_balance_delta = origin_balance_after - origin_balance_before
+
+dan:
+
+> amount_to_origin_balance_ratio = amount / origin_balance_before
+
+Untuk denominator `0`, __jangan menghasilkan infinity__. Kita perlu menentukan policy eksplisit, misalnya `0.0` atau `NULL`, lalu didokumentasikan.
+
+Untuk risk modeling, aku lebih menyukai:
+
+> NULL → kemudian ditangani pada preprocessing/model pipeline
+
+karena:
+
+> origin_balance_before = 0
+
+memang memiliki makna bisnis tersendiri.
+
+#### __C. Destination balance features__
+
+Analogous:
+```
+destination_balance_before
+destination_balance_after
+destination_balance_delta
+amount_to_destination_balance_ratio
 ```
 
-Do not commit the raw dataset to Git.
+#### __D. Balance consistency features__
 
----
+Ini menarik karena kita sudah melakukan domain profiling di Step 4.
 
-## Step 3 — Build ingestion
+Kita bisa membawa hasil domain knowledge tersebut menjadi feature.
 
-Create:
+Misalnya:
+```
+origin_balance_mismatch
+destination_balance_mismatch
+```
+sehingga model dapat belajar bahwa transaksi dengan balance behavior tertentu mungkin memiliki risk yang berbeda.
+
+#### __E. Transaction/account behavior__
+
+Untuk tahap awal, kita jangan langsung membuat fitur yang membutuhkan window aggregation kompleks.
+
+Kita bisa mulai dari:
+```
+is_zero_origin_balance_before
+is_zero_destination_balance_before
+origin_balance_depleted
+destination_balance_increased
+```
+Misalnya:
+```
+origin_balance_depleted =
+    origin_balance_after == 0
+```
+Ini cukup meaningful untuk transaction-risk modeling.
+
+Selain indicator transaksi, Step 5 juga mengimplementasikan historical
+behavior features berikut:
 
 ```text
-ml/data/ingestion.py
+transactions_last_1h
+transactions_last_24h
+amount_sum_last_24h
+unique_destinations_last_30d
 ```
 
-Responsibilities:
-
-- Read raw dataset
-- Apply explicit schema
-- Return Spark DataFrame
-- Log input statistics
+Semua historical features hanya menggunakan transaksi strictly sebelum
+transaksi saat ini. Transaksi dengan timestamp yang sama juga tidak ikut
+dihitung agar tidak ada kontribusi current-row yang ambigu.
 
 ---
+### Step 5.2 — Timestamp Features
 
-## Step 4 — Build validation
+Kita punya:
 
-Create:
+> timestamp
 
-```text
-ml/data/validation.py
+Maka kita dapat derive:
+```
+transaction_hour
+transaction_day
+transaction_day_of_week
+```
+Tetapi __jangan langsung memasukkan raw timestamp ke model__.
+
+Untuk model klasik, lebih baik kita derive:
+```
+transaction_hour
+transaction_day_of_week
+```
+dan nantinya kita bisa mempertimbangkan cyclical encoding:
+```
+hour_sin
+hour_cos
+```
+Namun untuk Step 5 initial implementation, cukup:
+```
+transaction_hour
+transaction_day_of_week
 ```
 
-Responsibilities:
-
-- Schema validation
-- Null checks
-- Range checks
-- Duplicate detection
-- Category validation
-- Data quality summary
-
 ---
+### Step 5.3 — Target
 
-## Step 5 — Build canonical transformation
+__`is_fraud` bukan feature__.
 
-Create:
+Ia adalah:
 
-```text
-ml/data/cleaning.py
+> target
+
+Jadi dataset konseptual kita:
+```
+features:
+    amount
+    amount_log
+    transaction_type
+    ...
+
+target:
+    is_fraud
+```
+Ini penting untuk menjaga boundary antara:
+```
+feature engineering
+        ↓
+training
 ```
 
-Responsibilities:
+---
+### Step 5.4 — Proposed Feature Dataset
 
-- Rename source columns
-- Create canonical schema
-- Normalize types
-- Create timestamp
-- Apply deterministic cleaning rules
+Output akhirnya kira-kira:
+
+> data/processed/features/
+
+dengan schema seperti:
+```
+transaction_id
+timestamp
+
+transaction_type
+
+amount
+amount_log
+
+origin_balance_before
+origin_balance_after
+origin_balance_delta
+amount_to_origin_balance_ratio
+
+destination_balance_before
+destination_balance_after
+destination_balance_delta
+amount_to_destination_balance_ratio
+
+origin_balance_mismatch
+destination_balance_mismatch
+
+is_zero_origin_balance_before
+is_zero_destination_balance_before
+origin_balance_depleted
+destination_balance_increased
+
+transactions_last_1h
+transactions_last_24h
+amount_sum_last_24h
+unique_destinations_last_30d
+
+transaction_hour
+transaction_day_of_week
+
+is_fraud
+```
+Account IDs kemungkinan __belum kita masukkan langsung sebagai model feature__.
+
+Ini keputusan yang disengaja.
+
+`origin_account_id` dan `destination_account_id` memiliki cardinality sangat tinggi dan naive encoding bisa menghasilkan feature space yang buruk serta berpotensi membuat model menghafal entity tertentu.
+
+Nanti kita bisa membuat __behavioral/account-level__ features dengan window aggregation secara khusus.
 
 ---
+### Step 5.5 — Struktur Code
 
-## Step 6 — Build feature engineering
+Aku sarankan mulai dengan:
+```
+ml/
+└── features/
+    ├── __init__.py
+    ├── transaction.py
+    ├── behavior.py
+    └── schema.py
+```
+dan pipeline:
+```
+pipelines/
+└── build_features.py
+```
+Tests:
+```
+tests/
+└── unit/
+    └── test_features.py
+```
+Jadi separation-nya:
+```
+ml/data/
+    ↓
+data ingestion + validation
 
-Create:
-
-```text
 ml/features/
-├── transaction_features.py
-├── behavioral_features.py
-└── pipeline.py
+    ↓
+feature transformation
+
+pipelines/
+    ↓
+orchestration / executable workflow
+
+tests/
+    ↓
+verification
+```
+Ini jauh lebih scalable daripada menaruh seluruh feature logic di `pipelines/build_features`.py.
+
+---
+### Step 5.6 — PySpark Strategy
+
+Karena kita sudah sepakat menggunakan __PySpark__, feature engineering juga kita lakukan menggunakan Spark DataFrame API.
+
+Contohnya secara konsep:
+```python
+df = df.withColumn("amount_log", F.log1p("amount")).withColumn(
+    "origin_balance_delta",
+    F.col("origin_balance_after") - F.col("origin_balance_before"),
+)
 ```
 
-Responsibilities:
+Bukan:
+```python
+df.toPandas()
+```
+Jadi pipeline kita tetap:
+```
+Parquet
+  ↓
+Spark DataFrame
+  ↓
+Spark transformations
+  ↓
+Parquet
+```
+Tidak ada conversion ke Pandas.
+
+Ini konsisten dengan positioning project sebagai __large-scale transaction ML pipeline__.
+
+---
+### Step 5.7 — Feature Engineering Rules
+
+Kita juga perlu membuat beberapa helper function supaya logic tidak menjadi monolithic.
+
+Misalnya:
+```
+build_transaction_features()
+build_balance_features()
+build_behavior_features()
+build_time_features()
+```
+Kemudian:
+```python
+def build_features(df):
+    df = build_transaction_features(df)
+    df = build_balance_features(df)
+    df = build_behavior_features(df)
+    df = build_time_features(df)
+
+    return df
+```
+Dengan begitu nantinya testing bisa granular.
+
+---
+### Step 5.8 — Testing
+
+Minimal kita ingin test:
+
+#### __Amount__
+```
+amount = 100
+→ amount_log = log1p(100)
+```
+#### __Balance delta__
+```
+before = 1000
+after = 700
+→ delta = -300
+```
+#### __Ratio__
+```
+amount = 100
+origin_balance_before = 1000
+→ ratio = 0.1
+```
+#### __Zero denominator__
+```
+origin_balance_before = 0
+→ ratio tidak boleh infinity
+```
+#### __Timestamp__
+```
+timestamp = known datetime
+→ hour benar
+→ day_of_week benar
+```
+#### __Transaction type__
+```
+PAYMENT
+→ is_payment = 1
+→ is_transfer = 0
+```
+#### __Target preservation__
+
+Pastikan:
+
+> is_fraud
+
+tetap ada dan tidak berubah.
+
+#### __Behavioral leakage__
+
+Untuk historical features, test juga harus memastikan:
 
 ```text
-transaction_features.py
-    ↓
-basic + balance features
-
-behavioral_features.py
-    ↓
-historical account behavior
-
-pipeline.py
-    ↓
-combine all features
+transaksi masa depan tidak memengaruhi transaksi saat ini
+transaksi pada timestamp yang sama tidak dihitung sebagai histori
 ```
 
 ---
+### Step 5.9 — Feature Schema Validation
 
-## Step 7 — Build dataset split
+Kita juga sebaiknya punya:
+```
+FEATURE_SCHEMA
+```
+seperti kita punya:
+```
+PAYSIM_SCHEMA
+CANONICAL_TRANSACTION_SCHEMA
+```
+Sehingga pipeline berikutnya bisa melakukan:
+```
+canonical schema
+        ↓
+feature transformation
+        ↓
+feature schema validation
+        ↓
+training
+```
+Ini akan sangat berguna ketika nanti kita masuk ke: __Step 6 — Dataset Splitting & Training Preparation__.
+
+---
+### Step 5.10 — Pipeline
+
+Nantinya command-nya:
+```pwsh
+python -m pipelines.build_features
+```
+Expected flow:
+```
+Reading canonical dataset
+        ↓
+Validating canonical input
+        ↓
+Building transaction features
+        ↓
+Building balance features
+        ↓
+Building behavioral features
+        ↓
+Building timestamp features
+        ↓
+Validating feature schema
+        ↓
+Writing feature dataset
+        ↓
+Feature engineering completed
+```
+Output:
+> data/processed/features/
+
+### Step 5 Definition of Done
+
+Step 5 baru kita anggap __DONE__ kalau:
+- [ ✓ ]  Feature contract didefinisikan
+- [ ✓ ]  Feature transformations implemented
+- [ ✓ ]  PySpark-only transformation
+- [ ✓ ]  Feature schema defined
+- [ ✓ ]  Feature pipeline implemented
+- [ ✓ ]  Feature dataset successfully written
+- [ ✓ ]  No NaN/infinity yang tidak terkontrol
+- [ ✓ ]  Target is_fraud preserved
+- [ ✓ ]  No obvious target leakage
+- [ ✓ ]  Unit tests implemented
+- [ ✓ ]  Unit tests passed
+- [ ✓ ]  Ruff passed
+- [ ✓ ]  pre-commit passed
+- [ ✓ ]  Pipeline berhasil dijalankan terhadap full 6.36M rows
+- [ ✓ ]  Feature output dapat dibaca kembali oleh Spark
+
+---
+
+## Step 6 — Dataset Splitting & Training Preparation
+
+Step 6 menggunakan feature dataset hasil Step 5 dan menyiapkan dataset yang
+siap dikonsumsi oleh Sprint 2. Step ini belum melakukan training model.
+
+### Step 6.1 — Chronological split
 
 Create:
 
@@ -888,22 +1273,173 @@ Create:
 ml/data/split.py
 ```
 
-Use chronological splitting.
+Dataset dibagi berdasarkan urutan waktu, bukan random split:
 
----
+```text
+earliest transactions   → train
+subsequent transactions → validation
+latest transactions     → test
+```
 
-## Step 8 — Write Parquet
+Default ratio dikontrol oleh `configs/data.yaml`:
 
-Create:
+```yaml
+split:
+  train_ratio: 0.70
+  validation_ratio: 0.15
+  test_ratio: 0.15
+```
+
+Boundary split harus deterministik dan tidak boleh mencampurkan transaksi
+masa depan ke dalam train dataset.
+
+### Step 6.2 — Target and metadata boundary
+
+Dataset split harus mempertahankan:
+
+```text
+is_fraud
+```
+
+sebagai target, bukan sebagai model feature. Kolom berikut diperlakukan
+sebagai identifier/metadata dan tidak boleh masuk ke feature vector secara
+naive:
+
+```text
+transaction_id
+origin_account_id
+destination_account_id
+timestamp
+```
+
+Feature columns harus berasal dari explicit feature contract Step 5.
+
+### Step 6.3 — Split output
+
+Output disimpan sebagai Parquet:
 
 ```text
 data/processed/
-├── transactions/
+├── canonical/
 └── features/
+    ├── part-*.parquet
     ├── train/
     ├── validation/
     └── test/
 ```
+
+Dataset Parquet pada root `features/` merupakan output feature assembly Step 5. Dataset `train/`,
+`validation/`, dan `test/` merupakan output Step 6.
+
+### Step 6.4 — Split validation
+
+Validasi minimum:
+
+```text
+train row count + validation row count + test row count = all row count
+max(train timestamp) <= min(validation timestamp)
+max(validation timestamp) <= min(test timestamp)
+schema konsisten antar split
+is_fraud tetap tersedia
+transaction_id tidak duplikat antar split
+```
+
+### Step 6 Definition of Done
+
+- [✓] `ml/data/split.py` implemented
+- [✓] Chronological split implemented
+- [✓] Split ratios read from configuration
+- [✓] Train/validation/test Parquet written
+- [✓] Row counts reconcile with the all-feature dataset
+- [✓] Temporal boundaries validated
+- [✓] Target preserved
+- [✓] No identifier leakage into the feature vector
+- [✓] Unit tests implemented
+- [✓] Integration test implemented
+
+---
+
+## Step 7 — End-to-End Data Pipeline
+
+Step 7 menyatukan seluruh proses Sprint 1 menjadi satu workflow yang dapat
+dijalankan ulang secara reproducible.
+
+### Step 7.1 — Pipeline orchestrator
+
+Create:
+
+```text
+pipelines/run_pipeline.py
+```
+
+Command utama:
+
+```pwsh
+python -m pipelines.run_pipeline
+```
+
+Orchestrator menjalankan:
+
+```text
+raw ingestion
+    ↓
+raw validation
+    ↓
+canonical transformation
+    ↓
+canonical validation
+    ↓
+domain validation and profiling
+    ↓
+feature engineering
+    ↓
+feature validation
+    ↓
+chronological split
+    ↓
+train/validation/test Parquet
+```
+
+### Step 7.2 — Failure semantics
+
+Pipeline harus fail fast. Jika validasi raw atau canonical gagal, proses
+berhenti dan tidak boleh menghasilkan dataset downstream yang dianggap valid.
+
+### Step 7.3 — Idempotency
+
+Pipeline harus aman dijalankan ulang. Untuk local development, output
+menggunakan `mode("overwrite")` atau strategi setara sehingga tidak terjadi
+append data atau duplikasi output.
+
+### Step 7.4 — Logging and summary
+
+Pipeline mencatat tahapan dan summary minimum:
+
+```text
+input rows
+canonical rows
+feature rows
+train/validation/test rows
+feature column count
+target column
+output paths
+```
+
+### Step 7.5 — End-to-end test
+
+Gunakan fixture kecil 5–20 transaksi di `data/sample/`. Test harus
+memverifikasi bahwa raw-to-split workflow dapat berjalan, output tersedia,
+row count terjaga, schema konsisten, dan target tetap ada.
+
+### Step 7 Definition of Done
+
+- [✓] `pipelines/run_pipeline.py` implemented
+- [✓] Fail-fast behavior verified
+- [✓] Idempotent execution verified
+- [✓] Pipeline logging implemented
+- [✓] End-to-end integration test implemented and passed
+- [✓] Makefile command `make pipeline` tersedia
+- [✓] Full pipeline completes successfully
 
 ---
 
@@ -967,26 +1503,71 @@ The integration test should use the small sample rather than the full dataset.
 
 Sprint 1 is complete when:
 
-- [ ] Raw dataset is available locally
-- [ ] Canonical transaction schema is implemented
-- [ ] PySpark ingestion works
-- [ ] Data quality validation works
-- [ ] Cleaning/transformation works
-- [ ] Transaction-level features work
-- [ ] Behavioral features work
-- [ ] Leakage prevention is tested
-- [ ] Chronological train/validation/test split works
-- [ ] Output is stored as Parquet
-- [ ] Sample dataset exists under `data/sample/`
-- [ ] Unit tests exist
-- [ ] Integration test exists
-- [ ] Ruff passes
-- [ ] Pytest passes
+- [ ✓ ]  Raw dataset is available locally
+- [ ✓ ]  Canonical transaction schema is implemented
+- [ ✓ ]  PySpark ingestion works
+- [ ✓ ]  Data quality validation works
+- [ ✓ ]  Cleaning/transformation works
+- [ ✓ ]  Transaction-level features work
+- [ ✓ ]  Behavioral features work
+- [ ✓ ]  Leakage prevention is tested
+- [ ✓ ]  Chronological train/validation/test split works
+- [ ✓ ]  Output is stored as Parquet
+- [ ✓ ]  Sample dataset exists under `data/sample/`
+- [ ✓ ]  Unit tests exist
+- [ ✓ ]  Integration test exists
+- [ ✓ ]  Ruff passes
+- [ ✓ ]  Pytest passes
 - [ ] GitHub Actions remains green
-- [ ] Pipeline can be reproduced from configuration
+- [ ✓ ]  Pipeline can be reproduced from configuration
 
 ---
 
+## Definition of Done per Scope — Sprint 1
+
+Kalau kita mengikuti plan ini, Sprint 1 baru benar-benar selesai ketika:
+
+### __Data Engineering__
+- [ ✓ ] Raw dataset ingestion menggunakan PySpark
+- [ ✓ ] Raw schema validation
+- [ ✓ ] Canonical transaction schema
+- [ ✓ ] Canonical transformation
+- [ ✓ ] Canonical dataset Parquet
+- [ ✓ ] Canonical validation
+- [ ✓ ] Domain validation
+- [ ✓ ] Domain profiling
+
+### __Feature Engineering__
+- [ ✓ ] Timestamp features
+- [ ✓ ] Amount features
+- [ ✓ ] Balance features
+- [ ✓ ] Behavioral features
+- [ ✓ ] Feature dataset assembly
+- [ ✓ ] Feature dataset validation
+- [ ✓ ] Feature Parquet
+
+### __Dataset Splitting__
+- [ ✓ ] Chronological train/validation/test split
+- [ ✓ ] Split validation
+- [ ✓ ] Train/validation/test Parquet
+
+### __Pipeline Engineering__
+- [ ✓ ] End-to-end orchestrator
+- [ ✓ ] Fail-fast behavior
+- [ ✓ ] Idempotent execution
+- [ ✓ ] Pipeline logging
+- [ ✓ ] Integration test
+- [ ✓ ] Makefile pipeline command
+
+### __Quality__
+- [ ✓ ] pytest
+- [ ✓ ] Ruff
+- [ ✓ ] formatting
+- [ ✓ ] pre-commit
+- [ ✓ ] GitHub Actions CI
+- [ ✓ ] final end-to-end pipeline green
+
+---
 # 22. Sprint 1 Success Criteria
 
 The most important outcome is not the number of features.

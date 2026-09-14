@@ -1,16 +1,12 @@
 import logging
 from pathlib import Path
 
+from app.core.logging import setup_logging
 from ml.data.profiling import (
     aggregate_balance_behavior,
     profile_balance_behavior,
 )
 from ml.data.spark import create_spark_session
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="| %(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +14,7 @@ CANONICAL_DATASET_PATH = Path("data/processed/canonical")
 
 
 def main() -> None:
+    setup_logging()
     spark = create_spark_session()
 
     logger.info("Reading canonical dataset: %s", CANONICAL_DATASET_PATH)

@@ -1,4 +1,4 @@
-.PHONY: install test lint-fix lint format format-check pre-commit run
+.PHONY: install test lint-fix lint format format-check pre-commit pipeline run
 
 install:
 	python -m pip install --upgrade pip
@@ -21,6 +21,9 @@ format-check:
 
 pre-commit:
 	pre-commit run --all-files
+
+pipeline:
+	python -m pipelines.run_pipeline
 
 run:
 	uvicorn app.main:app --reload

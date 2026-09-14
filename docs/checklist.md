@@ -79,15 +79,58 @@
 - [✓] data/processed/ tidak masuk Git
 
 ## Step 4: Data Quality Validation & Canonical Dataset Verification
-- [x] canonical Parquet dapat dibaca kembali
-- [x] schema valid
-- [x] row count = 6,362,620
-- [x] required fields tidak NULL
-- [x] transaction_id valid dan unique
-- [x] timestamp valid
-- [x] amount valid
-- [x] fraud labels valid
-- [x] fraud distribution berhasil dihitung
-- [x] automated tests pass
-- [x] Ruff pass
-- [x] pipeline validation berhasil
+- [✓] canonical Parquet dapat dibaca kembali
+- [✓] schema valid
+- [✓] row count = 6,362,620
+- [✓] required fields tidak NULL
+- [✓] transaction_id valid dan unique
+- [✓] timestamp valid
+- [✓] amount valid
+- [✓] fraud labels valid
+- [✓] fraud distribution berhasil dihitung
+- [✓] automated tests pass
+- [✓] Ruff pass
+- [✓] pipeline validation berhasil
+
+## Step 5: Feature Engineering
+- [✓] Feature contract didefinisikan
+- [✓] Historical behavioral features: `transactions_last_1h`
+- [✓] Historical behavioral features: `transactions_last_24h`
+- [✓] Historical behavioral features: `amount_sum_last_24h`
+- [✓] Historical behavioral features: `unique_destinations_last_30d`
+- [✓] Behavioral features exclude current and future transactions
+- [✓] Feature transformations implemented
+- [✓] PySpark-only transformation
+- [✓] Feature schema defined
+- [✓] Feature pipeline implemented
+- [✓] Feature dataset successfully written
+- [✓] No NaN/infinity yang tidak terkontrol
+- [✓] Target is_fraud preserved
+- [✓] No obvious target leakage
+- [✓] Unit tests implemented
+- [✓] Unit tests passed
+- [✓] Ruff passed
+- [✓] pre-commit passed
+- [✓] Pipeline berhasil dijalankan terhadap full 6.36M rows
+- [✓] Feature output dapat dibaca kembali oleh Spark
+
+## Step 6: Dataset Splitting & Training Preparation
+- [✓] `ml/data/split.py` implemented
+- [✓] Chronological split implemented
+- [✓] Split ratios read from configuration
+- [✓] Train/validation/test Parquet written
+- [✓] Row counts reconcile with the all-feature dataset
+- [✓] Temporal boundaries validated
+- [✓] Target preserved
+- [✓] Identifier columns excluded from model feature columns
+- [✓] Unit tests implemented
+- [✓] Integration test implemented
+
+## Step 7: End-to-End Data Pipeline
+- [✓] `pipelines/run_pipeline.py` implemented
+- [✓] Fail-fast behavior verified
+- [✓] Idempotent execution verified
+- [✓] Pipeline logging implemented
+- [✓] End-to-end integration test implemented and passed
+- [✓] Makefile command `make pipeline` tersedia
+- [✓] Full pipeline completes successfully

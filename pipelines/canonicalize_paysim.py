@@ -2,15 +2,11 @@ import logging
 
 import yaml
 
+from app.core.logging import setup_logging
 from ml.data.ingestion import read_paysim
 from ml.data.spark import create_spark_session
 from ml.data.transformation import transform_to_canonical
 from ml.data.validation import validate_paysim
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="| %(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +17,7 @@ def load_config(path: str) -> dict:
 
 
 def main() -> None:
+    setup_logging()
     config = load_config("configs/data.yaml")
 
     spark = create_spark_session()

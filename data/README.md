@@ -9,6 +9,7 @@ data/
 ├── raw/
 ├── processed/
 └── sample/
+    └── paysim_sample.csv
 ```
 
 ## Raw Data
@@ -31,6 +32,11 @@ data/raw/paysim.csv
 - ```data/processed/``` contains generated pipeline outputs.
 - ```data/sample/``` contains small datasets used for tests and development.
 - Raw and processed datasets must not be committed to Git.
+
+The repository includes ```data/sample/paysim_sample.csv``` as a small,
+version-controlled PaySim-compatible fixture for local development and
+integration tests. It is not intended to represent the full dataset
+distribution.
 
 ## Important PaySim Limitation
 

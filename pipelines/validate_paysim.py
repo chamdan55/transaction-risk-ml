@@ -1,18 +1,15 @@
 import logging
 
+from app.core.logging import setup_logging
 from ml.data.ingestion import read_paysim
 from ml.data.spark import create_spark_session
 from ml.data.validation import validate_paysim
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="| %(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
 
 logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    setup_logging()
     spark = create_spark_session()
 
     try:
