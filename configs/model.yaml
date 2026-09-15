@@ -39,3 +39,7 @@ evaluation:
     - 0.30
     - 0.40
     - 0.50
+
+outputs:
+  model_directory: artifacts/models
+  evaluation_report: artifacts/evaluation_report.json

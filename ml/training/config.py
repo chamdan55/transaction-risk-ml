@@ -28,6 +28,8 @@ class ModelConfig:
     imbalance_strategy: str
     model_params: dict[str, dict[str, Any]]
     thresholds: tuple[float, ...]
+    model_directory: Path
+    evaluation_report: Path
 
 
 def load_model_config(config_path: str | Path) -> ModelConfig:
@@ -49,6 +51,9 @@ def load_model_config(config_path: str | Path) -> ModelConfig:
     training_config = _require_mapping(raw_config, "training")
     models_config = _require_mapping(raw_config, "models")
     evaluation_config = _require_mapping(raw_config, "evaluation")
+    outputs_config = raw_config.get("outputs", {})
+    if not isinstance(outputs_config, dict):
+        raise ModelConfigurationError("outputs must be a mapping")
 
     features_path = _require_non_empty_string(data_config, "features_path")
     target_column = _require_non_empty_string(data_config, "target_column")
@@ -60,6 +65,10 @@ def load_model_config(config_path: str | Path) -> ModelConfig:
         "imbalance_strategy",
     )
     thresholds = _require_thresholds(evaluation_config)
+    model_directory = Path(outputs_config.get("model_directory", "artifacts/models"))
+    evaluation_report = Path(
+        outputs_config.get("evaluation_report", "artifacts/evaluation_report.json")
+    )
 
     if primary_metric not in SUPPORTED_PRIMARY_METRICS:
         raise ModelConfigurationError(
@@ -85,6 +94,8 @@ def load_model_config(config_path: str | Path) -> ModelConfig:
         imbalance_strategy=imbalance_strategy,
         model_params=model_params,
         thresholds=thresholds,
+        model_directory=model_directory,
+        evaluation_report=evaluation_report,
     )
 
 

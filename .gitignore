@@ -215,6 +215,9 @@ __marimo__/
 # ML artifacts
 mlruns/
 models/
+artifacts/
+.pre-commit-cache/
+.pytest-tmp-model-config/
 
 # Data
 data/raw/

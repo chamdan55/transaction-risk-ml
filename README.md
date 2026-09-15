@@ -2,7 +2,7 @@
 
 End-to-end machine learning platform for transaction risk scoring, designed to demonstrate production-oriented Machine Learning Engineering practices across the complete ML lifecycle.
 
-> **Current status:** Sprint 0 completed and Sprint 1 Steps 1–4 completed.
+> **Current status:** Sprint 0, Sprint 1, and Sprint 2 completed. The project now has a reproducible data-to-model training and evaluation flow.
 
 ---
 
@@ -163,6 +163,8 @@ The current architecture separates data engineering, ML logic, pipelines, tests,
 ### Data & ML
 - PySpark
 - scikit-learn
+- XGBoost
+- Joblib
 - PyTorch
 - Additional ML/AI libraries will be introduced only when required by later sprints.
 
@@ -237,6 +239,20 @@ transaction-risk-ml/
 └── README.md
 ```
 The structure will evolve as feature engineering, training, serving, and monitoring components are added.
+
+Sprint 2 additions include:
+
+```text
+configs/model.yaml
+ml/
+├── evaluation/
+└── training/
+pipelines/train_models.py
+tests/
+├── unit/
+└── integration/test_training_pipeline.py
+data/sample/paysim_sample.csv
+```
 
 ---
 
@@ -389,7 +405,50 @@ This is important because transaction consistency cannot be modeled safely using
 
 ---
 
-## 9. Current Data Quality Philosophy
+## 9. Sprint 2 — ML Development & Evaluation
+
+Status: __Completed__
+
+Sprint 2 implemented a reproducible model development and evaluation flow using the feature splits produced by Sprint 1.
+
+Implemented:
+- Training dataset contract for train/validation/test Parquet splits
+- Feature preprocessing with numeric imputation/scaling and categorical encoding
+- Class imbalance analysis and weighting
+- Logistic Regression baseline
+- Random Forest comparison model
+- XGBoost comparison model
+- Precision, recall, F1, ROC-AUC, and PR-AUC evaluation
+- Confusion matrix and threshold analysis
+- Business-cost threshold selection
+- Validation-based production candidate selection
+- Final test evaluation using the selected model and threshold
+- Joblib model artifacts and JSON evaluation report
+- Reproducible training configuration in `configs/model.yaml`
+- Unit and integration tests for the training flow
+
+Run the model training pipeline:
+
+```pwsh
+python -m pipelines.train_models
+```
+
+Expected outputs:
+
+```text
+artifacts/
+├── models/
+│   ├── logistic_regression.joblib
+│   ├── random_forest.joblib
+│   └── xgboost.joblib
+└── evaluation_report.json
+```
+
+See the complete implementation plan in [`docs/SPRINT_2_ML_DEVELOPMENT_AND_EVALUATION_PLAN.md`](docs/SPRINT_2_ML_DEVELOPMENT_AND_EVALUATION_PLAN.md).
+
+---
+
+## 10. Current Data Quality Philosophy
 
 The project intentionally separates three concepts:
 
@@ -428,7 +487,7 @@ This separation prevents the pipeline from incorrectly treating every observed b
 
 ---
 
-## 10. Current Pipeline Commands
+## 11. Current Pipeline Commands
 
 Activate the Conda environment:
 ~~~pwsh
@@ -452,6 +511,10 @@ Run canonical profiling:
 ```pwsh
 python -m pipelines.profile_canonical
 ```
+Run model training and evaluation:
+```pwsh
+python -m pipelines.train_models
+```
 Run unit tests:
 ```pwsh
 pytest
@@ -471,7 +534,7 @@ make pre-commit
 
 ---
 
-## 11. Engineering Quality Gates
+## 12. Engineering Quality Gates
 
 Before considering a change complete, the project aims to keep the following green:
 ```
@@ -485,7 +548,7 @@ For data-processing changes, the relevant pipeline should also execute successfu
 
 ---
 
-## 12. Known Local Development Considerations
+## 13. Known Local Development Considerations
 
 The current development environment is Windows + Conda.
 
@@ -504,7 +567,7 @@ A containerized Spark execution environment is planned for development/productio
 
 ---
 
-## 13. Planned Roadmap
+## 14. Planned Roadmap
 
 The next stages will continue the ML lifecycle.
 ```
@@ -521,11 +584,13 @@ Data Foundation
         ✓ Step 4
         │
         ▼
-Step 5+
-Feature Engineering
+Sprint 2
+ML Development & Evaluation
+        ✓ Completed
         │
         ▼
-Dataset Splitting
+Sprint 3+
+Model Packaging
         │
         ▼
 Model Development
@@ -552,7 +617,7 @@ The exact implementation will be introduced incrementally through subsequent spr
 
 ---
 
-## 14. Project Principles
+## 15. Project Principles
 ### 1. Production-oriented, not notebook-oriented
 
 The project prioritizes reusable modules and executable pipelines over one-off notebook experimentation.
@@ -583,7 +648,7 @@ The final system should expose enough information to understand both model behav
 
 ---
 
-## 15. Target Outcome
+## 16. Target Outcome
 
 The final project should demonstrate the ability to take a transaction-risk ML use case from raw data to a production-oriented ML service:
 ```

@@ -292,30 +292,30 @@ Setelah Sprint 2 selesai, repository diharapkan memiliki:
 
 ## 8. Definition of Done
 
-- [ ] Training dataset contract diimplementasikan.
-- [ ] Train, validation, dan test Parquet dapat dibaca kembali.
-- [ ] Model input tidak mengandung identifier, target, atau proxy label.
-- [ ] Feature availability dan leakage policy terdokumentasi.
-- [ ] Preprocessing konsisten antara train, validation, dan test.
-- [ ] Class imbalance strategy diterapkan dan terdokumentasi.
-- [ ] Logistic Regression berhasil dilatih sebagai baseline.
-- [ ] Random Forest berhasil dilatih.
-- [ ] XGBoost berhasil dilatih.
-- [ ] Minimal tiga model dibandingkan.
-- [ ] Precision, recall, F1, ROC-AUC, dan PR-AUC tersedia.
-- [ ] Confusion matrix tersedia.
-- [ ] Threshold analysis tersedia.
-- [ ] Production candidate ditentukan berdasarkan validation result.
-- [ ] Final evaluation dilakukan pada test set.
-- [ ] Model artifact dapat dimuat kembali.
-- [ ] Evaluation report dapat dibaca kembali.
-- [ ] Training dapat direproduksi dari konfigurasi.
-- [ ] Unit test tersedia dan passed.
-- [ ] Integration test tersedia dan passed.
-- [ ] Ruff passed.
-- [ ] Format check passed.
-- [ ] Pre-commit passed.
-- [ ] GitHub Actions tetap green.
+- [x] Training dataset contract diimplementasikan.
+- [x] Train, validation, dan test Parquet dapat dibaca kembali.
+- [x] Model input tidak mengandung identifier, target, atau proxy label.
+- [x] Feature availability dan leakage policy terdokumentasi.
+- [x] Preprocessing konsisten antara train, validation, dan test.
+- [x] Class imbalance strategy diterapkan dan terdokumentasi.
+- [x] Logistic Regression berhasil dilatih sebagai baseline.
+- [x] Random Forest berhasil dilatih.
+- [x] XGBoost berhasil dilatih.
+- [x] Minimal tiga model dibandingkan.
+- [x] Precision, recall, F1, ROC-AUC, dan PR-AUC tersedia.
+- [x] Confusion matrix tersedia.
+- [x] Threshold analysis tersedia.
+- [x] Production candidate ditentukan berdasarkan validation result.
+- [x] Final evaluation dilakukan pada test set.
+- [x] Model artifact dapat dimuat kembali.
+- [x] Evaluation report dapat dibaca kembali.
+- [x] Training dapat direproduksi dari konfigurasi.
+- [x] Unit test tersedia dan passed.
+- [x] Integration test tersedia dan passed.
+- [x] Ruff passed.
+- [x] Format check passed.
+- [x] Pre-commit passed.
+- [x] GitHub Actions tetap green.
 
 ## 9. Sprint 2 Completion Criteria
 
