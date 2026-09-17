@@ -1,0 +1,5 @@
+tracking:
+  uri: mlruns
+  experiment_name: transaction-risk-classification
+  registered_model_name: transaction-risk-model
+  artifact_location: mlartifacts
