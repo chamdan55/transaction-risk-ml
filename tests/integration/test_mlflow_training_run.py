@@ -59,10 +59,7 @@ def test_registered_model_is_loadable_and_can_be_explicitly_promoted(tmp_path):
         approved_by="integration-test",
         reason="Explicit promotion workflow verification.",
     )
-    assert (
-        registry_client.get_model_version_by_alias(
-            config.registered_model_name,
-            "staging",
-        ).version
-        == int(reference.registered_model_version)
-    )
+    assert registry_client.get_model_version_by_alias(
+        config.registered_model_name,
+        "staging",
+    ).version == int(reference.registered_model_version)
