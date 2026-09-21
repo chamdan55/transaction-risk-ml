@@ -26,6 +26,7 @@ class ModelConfig:
     random_seed: int
     primary_metric: str
     imbalance_strategy: str
+    sampling_max_rows: dict[str, int]
     model_params: dict[str, dict[str, Any]]
     thresholds: tuple[float, ...]
     model_directory: Path
@@ -64,6 +65,7 @@ def load_model_config(config_path: str | Path) -> ModelConfig:
         {"imbalance_strategy": training_config.get("imbalance_strategy", "balanced")},
         "imbalance_strategy",
     )
+    sampling_max_rows = _require_sampling_max_rows(training_config)
     thresholds = _require_thresholds(evaluation_config)
     model_directory = Path(outputs_config.get("model_directory", "artifacts/models"))
     evaluation_report = Path(
@@ -92,6 +94,7 @@ def load_model_config(config_path: str | Path) -> ModelConfig:
         random_seed=random_seed,
         primary_metric=primary_metric,
         imbalance_strategy=imbalance_strategy,
+        sampling_max_rows=sampling_max_rows,
         model_params=model_params,
         thresholds=thresholds,
         model_directory=model_directory,
@@ -131,6 +134,20 @@ def _require_int(mapping: dict[str, Any], key: str, *, minimum: int | None = Non
     if minimum is not None and value < minimum:
         raise ModelConfigurationError(f"{key} must be at least {minimum}")
     return value
+
+
+def _require_sampling_max_rows(training_config: dict[str, Any]) -> dict[str, int]:
+    sampling_config = _require_mapping(training_config, "sampling")
+    max_rows = _require_mapping(sampling_config, "max_rows")
+    expected_splits = {"train", "validation", "test"}
+    if set(max_rows) != expected_splits:
+        raise ModelConfigurationError(
+            f"sampling.max_rows must contain exactly: {sorted(expected_splits)}"
+        )
+    return {
+        split_name: _require_int(max_rows, split_name, minimum=1)
+        for split_name in sorted(expected_splits)
+    }
 
 
 def _require_thresholds(mapping: dict[str, Any]) -> tuple[float, ...]:

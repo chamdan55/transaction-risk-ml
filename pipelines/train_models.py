@@ -13,6 +13,7 @@ import joblib
 from pyspark.sql import SparkSession
 
 from app.core.logging import setup_logging
+from ml.data.spark import create_spark_session
 from ml.evaluation.selection import (
     FinalTestResult,
     ProductionCandidate,
@@ -30,6 +31,11 @@ from ml.training.config import ModelConfig, load_model_config
 from ml.training.dataset import load_training_dataset
 from ml.training.models import train_random_forest, train_xgboost
 from ml.training.preprocessing import spark_frame_to_pandas
+from ml.training.sampling import (
+    SamplingSummary,
+    deterministically_sample_rows,
+    retain_all_positives_and_sample_negatives,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -78,14 +84,19 @@ def run_training_pipeline(
         bundle.summary.split_summaries["test"].row_count,
         len(feature_columns),
     )
-    train_frame = spark_frame_to_pandas(bundle.train, (*feature_columns, config.target_column))
-    validation_frame = spark_frame_to_pandas(
-        bundle.validation, (*feature_columns, config.target_column)
+    sampled_splits, sampling_summaries = _sample_splits_for_training(bundle, config)
+    train_frame = spark_frame_to_pandas(
+        sampled_splits["train"], (*feature_columns, config.target_column)
     )
-    test_frame = spark_frame_to_pandas(bundle.test, (*feature_columns, config.target_column))
+    validation_frame = spark_frame_to_pandas(
+        sampled_splits["validation"], (*feature_columns, config.target_column)
+    )
+    test_frame = spark_frame_to_pandas(
+        sampled_splits["test"], (*feature_columns, config.target_column)
+    )
 
     LOGGER.info(
-        "Feature frames materialized: train=%s, validation=%s, test=%s",
+        "Sampled feature frames materialized: train=%s, validation=%s, test=%s",
         len(train_frame),
         len(validation_frame),
         len(test_frame),
@@ -148,6 +159,7 @@ def run_training_pipeline(
     report = _build_report(
         config=config,
         bundle_summary=bundle.summary.as_dict(),
+        sampling_summaries=sampling_summaries,
         validation_report=validation_report,
         candidate=candidate,
         final_result=final_result,
@@ -166,6 +178,7 @@ def run_training_pipeline(
         candidate=candidate,
         final_result=final_result,
         report=report,
+        sampling_summaries=sampling_summaries,
     )
     summary = TrainingPipelineSummary(
         train_row_count=len(train_frame),
@@ -182,6 +195,30 @@ def run_training_pipeline(
     )
     LOGGER.info("Model training completed: %s", summary)
     return summary
+
+
+def _sample_splits_for_training(
+    bundle: Any,
+    config: ModelConfig,
+) -> tuple[dict[str, Any], dict[str, SamplingSummary]]:
+    sampled_splits = {}
+    summaries = {}
+    for split_name in ("train", "validation", "test"):
+        sampling_function = (
+            retain_all_positives_and_sample_negatives
+            if split_name == "train"
+            else deterministically_sample_rows
+        )
+        sampled_df, summary = sampling_function(
+            bundle.by_name(split_name),
+            target_column=config.target_column,
+            max_rows=config.sampling_max_rows[split_name],
+            random_seed=config.random_seed,
+        )
+        sampled_splits[split_name] = sampled_df
+        summaries[split_name] = summary
+        LOGGER.info("Sampling %s split: %s", split_name, summary)
+    return sampled_splits, summaries
 
 
 @dataclass(frozen=True)
@@ -204,6 +241,7 @@ def _track_training_run(
     candidate: ProductionCandidate,
     final_result: FinalTestResult,
     report: dict[str, Any],
+    sampling_summaries: dict[str, SamplingSummary],
 ) -> TrackingRunSummary:
     """Log comparable model runs and register only the selected candidate."""
 
@@ -228,6 +266,9 @@ def _track_training_run(
         "imbalance_strategy": config.imbalance_strategy,
         "preprocessing": "median_imputation+standard_scaling+one_hot_encoding",
         "threshold_candidates": list(config.thresholds),
+        "sampling": {
+            split_name: summary.as_dict() for split_name, summary in sampling_summaries.items()
+        },
     }
     with client.start_run(run_name="training-pipeline") as parent_run:
         client.set_tags(parent_tags)
@@ -362,6 +403,7 @@ def _build_report(
     *,
     config: ModelConfig,
     bundle_summary: dict[str, Any],
+    sampling_summaries: dict[str, SamplingSummary],
     validation_report: dict[str, Any],
     candidate: ProductionCandidate,
     final_result: FinalTestResult,
@@ -374,6 +416,9 @@ def _build_report(
             "thresholds": list(config.thresholds),
         },
         "dataset": bundle_summary,
+        "sampling": {
+            split_name: summary.as_dict() for split_name, summary in sampling_summaries.items()
+        },
         "validation": validation_report,
         "candidate": candidate.as_dict(),
         "test": final_result.metrics.as_dict(),
@@ -414,7 +459,7 @@ def main() -> None:
     args = _parse_args()
     config = load_model_config(args.config)
     tracking_config = load_tracking_config(args.tracking_config)
-    spark = SparkSession.builder.appName("TransactionRiskML-ModelTraining").getOrCreate()
+    spark = create_spark_session()
     try:
         run_training_pipeline(
             spark,

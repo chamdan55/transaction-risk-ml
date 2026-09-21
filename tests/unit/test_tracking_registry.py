@@ -9,8 +9,8 @@ class FakeSklearn:
     logged = None
 
     @classmethod
-    def log_model(cls, model, artifact_path, registered_model_name):
-        cls.logged = (model, artifact_path, registered_model_name)
+    def log_model(cls, model, artifact_path, registered_model_name, serialization_format):
+        cls.logged = (model, artifact_path, registered_model_name, serialization_format)
         return SimpleNamespace(
             model_uri="runs:/run-1/model",
             registered_model_version="1",
@@ -48,4 +48,5 @@ def test_model_artifact_is_logged_registered_and_loadable():
         model,
         "models/xgboost",
         "transaction-risk-model",
+        "cloudpickle",
     )

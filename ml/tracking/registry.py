@@ -52,7 +52,7 @@ def log_and_register_model(
     registered_version = getattr(model_info, "registered_model_version", None)
     reference = LoggedModel(
         model_name=model_name,
-        artifact_path=artifact_path,
+        name=artifact_path,
         model_uri=model_uri,
         registered_model_name=registered_model_name,
         registered_model_version=(

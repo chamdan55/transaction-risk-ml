@@ -1,5 +1,6 @@
 import importlib.util
 
+import pandas as pd
 import pytest
 from sklearn.linear_model import LogisticRegression
 
@@ -10,6 +11,8 @@ from ml.tracking.registry import (
     log_and_register_model,
     promote_registered_model,
 )
+from ml.training.baseline import train_logistic_regression_baseline
+from ml.training.config import load_model_config
 
 pytestmark = pytest.mark.skipif(
     importlib.util.find_spec("mlflow") is None,
@@ -63,3 +66,38 @@ def test_registered_model_is_loadable_and_can_be_explicitly_promoted(tmp_path):
         config.registered_model_name,
         "staging",
     ).version == int(reference.registered_model_version)
+
+
+def test_project_model_bundle_is_logged_with_cloudpickle(tmp_path):
+    model_config = load_model_config("configs/model.yaml")
+    frame = pd.DataFrame(
+        {
+            "amount_log": [0.1, 0.2, 1.0, 1.2],
+            "transaction_type": ["PAYMENT", "PAYMENT", "TRANSFER", "TRANSFER"],
+            "is_fraud": [0, 0, 1, 1],
+        }
+    )
+    model = train_logistic_regression_baseline(
+        frame,
+        feature_columns=("amount_log", "transaction_type"),
+        config=model_config,
+    )
+    database_path = (tmp_path / "mlflow.db").as_posix()
+    tracking_config = TrackingConfig(
+        uri=f"sqlite:///{database_path}",
+        experiment_name="bundle-serialization",
+        registered_model_name="bundle-model",
+        artifact_location=(tmp_path / "artifacts").as_uri(),
+    )
+    client = MlflowTrackingClient(tracking_config)
+    client.configure()
+
+    with client.start_run(run_name="bundle"):
+        reference = log_and_register_model(
+            client,
+            model,
+            model_name="logistic_regression",
+        )
+        loaded = load_logged_model(client, reference)
+
+    assert loaded.predict(frame).shape == (len(frame),)

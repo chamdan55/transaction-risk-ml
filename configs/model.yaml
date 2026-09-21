@@ -13,6 +13,11 @@ training:
   random_seed: 42
   primary_metric: pr_auc
   imbalance_strategy: balanced
+  sampling:
+    max_rows:
+      train: 200000
+      validation: 100000
+      test: 100000
 
 models:
   logistic_regression:

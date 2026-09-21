@@ -16,6 +16,7 @@ def test_model_config_loads_repository_configuration():
     assert config.random_seed == 42
     assert config.primary_metric == "pr_auc"
     assert config.thresholds == (0.1, 0.2, 0.3, 0.4, 0.5)
+    assert config.sampling_max_rows == {"test": 100000, "train": 200000, "validation": 100000}
     assert {"logistic_regression", "random_forest", "xgboost"} == set(config.model_params)
 
 
@@ -30,6 +31,8 @@ data:
 training:
   random_seed: 42
   primary_metric: pr_auc
+  sampling:
+    max_rows: {train: 10, validation: 10, test: 10}
 models:
   logistic_regression: {}
   random_forest: {}
@@ -54,6 +57,8 @@ data:
 training:
   random_seed: 42
   primary_metric: pr_auc
+  sampling:
+    max_rows: {train: 10, validation: 10, test: 10}
 models:
   logistic_regression: {}
   random_forest: {}

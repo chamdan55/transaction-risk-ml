@@ -118,8 +118,9 @@ class MlflowTrackingClient:
         try:
             return mlflow.sklearn.log_model(
                 model,
-                artifact_path=artifact_path,
+                name=artifact_path,
                 registered_model_name=registered_model_name,
+                serialization_format="cloudpickle",
             )
         except Exception as exc:
             raise TrackingClientError("Unable to log MLflow model artifact") from exc
