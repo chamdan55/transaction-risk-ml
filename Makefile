@@ -1,4 +1,4 @@
-.PHONY: install test lint-fix lint format format-check pre-commit pipeline run
+.PHONY: install test lint-fix lint format format-check pre-commit pipeline train run
 
 install:
 	python -m pip install --upgrade pip
@@ -24,6 +24,9 @@ pre-commit:
 
 pipeline:
 	python -m pipelines.run_pipeline
+
+train:
+	python -m pipelines.train_models
 
 run:
 	uvicorn app.main:app --reload

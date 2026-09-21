@@ -14,7 +14,24 @@ Folder ini berisi integration boundary untuk MLflow pada Sprint 3.
 
 - Experiment name: `transaction-risk-classification`.
 - Registered model name: `transaction-risk-model`.
-- Tracking URI dan artifact location berasal dari `configs/tracking.yaml`.
+- Tracking URI SQLite dan artifact location berasal dari `configs/tracking.yaml`.
 - Tracking storage lokal tidak di-commit ke Git.
 
 Model artifact disimpan sebagai satu bundle yang mencakup preprocessing dan estimator. Model registry metadata tetap berasal dari MLflow run.
+
+## Workflow
+
+Jalankan training dan tracking bersama-sama:
+
+```pwsh
+python -m pipelines.train_models --config configs/model.yaml --tracking-config configs/tracking.yaml
+```
+
+Perintah tersebut membuat parent run, nested validation run untuk setiap model, lalu final
+candidate run yang menyimpan evaluation report dan mendaftarkan model pemenang. Alias
+`candidate` boleh bergerak otomatis ke version candidate terbaru; alias `staging` dan
+`production` selalu membutuhkan persetujuan eksplisit:
+
+```pwsh
+python -m pipelines.promote_model --version 3 --stage staging --approved-by "reviewer" --reason "PR-AUC dan recall memenuhi quality gate."
+```

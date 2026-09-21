@@ -589,8 +589,9 @@ ML Development & Evaluation
         ✓ Completed
         │
         ▼
-Sprint 3+
-Model Packaging
+Sprint 3
+Experiment Tracking + Model Registry
+        ✓ Completed
         │
         ▼
 Model Development

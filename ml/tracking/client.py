@@ -93,6 +93,16 @@ class MlflowTrackingClient:
         except Exception as exc:
             raise TrackingClientError("Unable to log MLflow dictionary artifact") from exc
 
+    def set_tags(self, tags: dict[str, str]) -> None:
+        """Attach stable, queryable tags to the active MLflow run."""
+
+        if not tags:
+            raise TrackingClientError("tags must not be empty")
+        try:
+            self._load_mlflow().set_tags(tags)
+        except Exception as exc:
+            raise TrackingClientError("Unable to set MLflow run tags") from exc
+
     def log_model(
         self,
         model: Any,
@@ -124,6 +134,49 @@ class MlflowTrackingClient:
             return mlflow.sklearn.load_model(model_uri)
         except Exception as exc:
             raise TrackingClientError("Unable to load MLflow model artifact") from exc
+
+    def set_model_version_tags(
+        self,
+        *,
+        registered_model_name: str,
+        version: str,
+        tags: dict[str, str],
+    ) -> None:
+        """Persist traceability metadata on one registered model version."""
+
+        if not registered_model_name.strip() or not version.strip() or not tags:
+            raise TrackingClientError("registered model name, version, and tags are required")
+        try:
+            registry_client = self._load_mlflow().tracking.MlflowClient(
+                tracking_uri=self.config.uri
+            )
+            for key, value in tags.items():
+                registry_client.set_model_version_tag(
+                    registered_model_name,
+                    version,
+                    key,
+                    value,
+                )
+        except Exception as exc:
+            raise TrackingClientError("Unable to set MLflow model version tags") from exc
+
+    def set_model_alias(
+        self,
+        *,
+        registered_model_name: str,
+        alias: str,
+        version: str,
+    ) -> None:
+        """Point a registered-model alias at an explicitly approved version."""
+
+        if not registered_model_name.strip() or not alias.strip() or not version.strip():
+            raise TrackingClientError("registered model name, alias, and version are required")
+        try:
+            self._load_mlflow().tracking.MlflowClient(
+                tracking_uri=self.config.uri
+            ).set_registered_model_alias(registered_model_name, alias, version)
+        except Exception as exc:
+            raise TrackingClientError("Unable to set MLflow model alias") from exc
 
     def _load_mlflow(self) -> ModuleType:
         if self._mlflow is None:

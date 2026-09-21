@@ -214,6 +214,9 @@ __marimo__/
 
 # ML artifacts
 mlruns/
+mlartifacts/
+mlflow.db
+mlflow.db-*
 models/
 artifacts/
 .pre-commit-cache/

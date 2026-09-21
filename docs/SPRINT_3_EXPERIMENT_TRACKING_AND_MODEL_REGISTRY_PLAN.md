@@ -60,7 +60,7 @@ Training Run
 └── Model artifact
 ```
 
-Local development menggunakan MLflow tracking URI berbasis local file atau SQLite. Tracking storage dan model artifacts tidak boleh masuk Git.
+Local development menggunakan MLflow tracking URI berbasis SQLite. Tracking storage dan model artifacts tidak boleh masuk Git.
 
 ## 4. Tracking Contract
 
@@ -148,7 +148,7 @@ Contoh konfigurasi:
 
 ```yaml
 tracking:
-  uri: mlruns
+  uri: sqlite:///mlflow.db
   experiment_name: transaction-risk-classification
   registered_model_name: transaction-risk-model
   artifact_location: mlartifacts
@@ -246,6 +246,10 @@ Implementation:
 - Menyimpan validation dan final test metrics pada version metadata.
 - Tidak melakukan automatic production promotion tanpa quality gate.
 
+Status: **Completed.** Candidate alias dibuat saat model pemenang terdaftar. Promosi ke
+`staging` atau `production` hanya dapat dilakukan secara eksplisit melalui
+`python -m pipelines.promote_model` dan wajib menyertakan approver serta alasan.
+
 ### Step 8 — Integrate with Training Pipeline
 
 Tujuan: menjalankan training dan tracking dari satu command.
@@ -258,6 +262,11 @@ Implementation:
 - Menjalankan final test evaluation setelah candidate dipilih.
 - Menutup run secara aman ketika terjadi exception.
 - Menyimpan run ID dan registered model version pada summary.
+
+Status: **Completed.** `python -m pipelines.train_models` membaca
+`configs/tracking.yaml`, membuat parent run dan nested validation/final runs, mencatat
+parameter, metadata dataset, threshold analysis, validation/final-test metrics, evaluation
+report, serta mendaftarkan hanya model candidate.
 
 ### Step 9 — Add Tests and Quality Gates
 
@@ -281,6 +290,9 @@ Quality checks:
 - Pre-commit passed.
 - GitHub Actions tetap green.
 
+Status: **Completed in code.** Unit test promotion dan integration test MLflow ditambahkan;
+integration test akan di-skip hanya jika dependency MLflow tidak tersedia pada environment.
+
 ## 7. Expected Outputs
 
 Setelah Sprint 3 selesai, repository diharapkan memiliki:
@@ -296,25 +308,32 @@ Setelah Sprint 3 selesai, repository diharapkan memiliki:
 
 ## 8. Definition of Done
 
-- [ ] MLflow dependency ditambahkan dan terdokumentasi.
-- [ ] Tracking configuration tersedia.
-- [ ] Experiment dapat dibuat atau digunakan kembali secara deterministik.
-- [ ] Tracking URI dapat dikonfigurasi secara lokal.
-- [ ] Training parameters tersimpan pada run.
-- [ ] Validation metrics tersimpan pada run.
-- [ ] Final test metrics tersimpan pada run.
-- [ ] Threshold analysis tersimpan sebagai artifact.
-- [ ] Dataset metadata tersimpan pada run.
-- [ ] Model artifact tersimpan pada run.
-- [ ] Production candidate terdaftar di Model Registry.
-- [ ] Model version memiliki metadata yang lengkap.
-- [ ] Promotion workflow candidate/staging/production terdokumentasi.
-- [ ] Model registered dapat dimuat kembali.
-- [ ] Training run dapat direproduksi dari configuration.
-- [ ] Unit test tracking tersedia dan passed.
-- [ ] Integration test MLflow tersedia dan passed.
-- [ ] Ruff passed.
-- [ ] Format check passed.
+**Status implementasi: selesai. Status Sprint 3: menunggu quality-gate akhir.**
+
+Seluruh capability Step 1–9 telah diimplementasikan dan flow MLflow registry telah
+diverifikasi melalui integration test SQLite. Checklist yang masih terbuka hanya
+verifikasi end-to-end yang memerlukan runtime Spark normal serta gate repository/CI.
+
+- [x] MLflow dependency ditambahkan dan terdokumentasi.
+- [x] Tracking configuration tersedia.
+- [x] Experiment dapat dibuat atau digunakan kembali secara deterministik.
+- [x] Tracking URI dapat dikonfigurasi secara lokal.
+- [x] Training parameters tersimpan pada run.
+- [x] Validation metrics tersimpan pada run.
+- [x] Final test metrics tersimpan pada run.
+- [x] Threshold analysis tersimpan sebagai artifact.
+- [x] Dataset metadata tersimpan pada run.
+- [x] Model artifact tersimpan pada run.
+- [x] Production candidate terdaftar di Model Registry.
+- [x] Model version memiliki metadata yang lengkap.
+- [x] Promotion workflow candidate/staging/production terdokumentasi.
+- [x] Model registered dapat dimuat kembali.
+- [ ] Training run + tracking dapat direproduksi end-to-end dari configuration pada runtime Spark normal.
+- [x] Unit test tracking tersedia dan passed.
+- [x] Integration test MLflow tersedia dan passed.
+- [x] Ruff passed.
+- [x] Format check passed.
+- [ ] Full pytest suite passed (terblokir di sandbox: Spark/Java tidak dapat membuka loopback socket).
 - [ ] Pre-commit passed.
 - [ ] GitHub Actions tetap green.
 

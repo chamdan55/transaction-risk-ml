@@ -12,7 +12,7 @@ TRACKING_CONFIG_PATH = PROJECT_ROOT / "configs" / "tracking.yaml"
 def test_tracking_config_loads_repository_configuration():
     config = load_tracking_config(TRACKING_CONFIG_PATH)
 
-    assert config.uri == "mlruns"
+    assert config.uri == "sqlite:///mlflow.db"
     assert config.experiment_name == "transaction-risk-classification"
     assert config.registered_model_name == "transaction-risk-model"
     assert config.artifact_location == "mlartifacts"
