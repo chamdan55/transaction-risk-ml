@@ -64,23 +64,25 @@ jobs:
           podman logs transaction-risk-serving-ci
           exit 1
 
-      - name: Export OCI image archive for security tooling
-        run: podman save --format oci-archive --output transaction-risk-serving.oci.tar transaction-risk-serving:ci
+      - name: Export Podman image archive for security tooling
+        run: podman save --format docker-archive --output transaction-risk-serving.tar transaction-risk-serving:ci
 
       - name: Generate serving SBOM
         uses: anchore/sbom-action@v0
         with:
-          file: transaction-risk-serving.oci.tar
+          file: transaction-risk-serving.tar
           artifact-name: transaction-risk-serving-sbom
 
-      - name: Scan serving image for critical vulnerabilities
-        uses: aquasecurity/trivy-action@v0.36.0
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@e07451d2e059ed86c2870430ea286b3a9e0bf241
         with:
-          input: transaction-risk-serving.oci.tar
-          format: table
-          exit-code: "1"
-          ignore-unfixed: true
-          severity: CRITICAL
+          version: v0.70.0
+          cache: true
+
+      - name: Scan serving image for critical vulnerabilities
+        run: >-
+          trivy image --input transaction-risk-serving.tar --scanners vuln
+          --format table --exit-code 1 --ignore-unfixed --severity CRITICAL
 
       - name: Remove serving smoke container
         if: always()
