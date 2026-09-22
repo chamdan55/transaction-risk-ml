@@ -43,7 +43,6 @@ class FeaturePreprocessor:
         features = _select_features(
             train_frame,
             feature_columns=self.feature_columns,
-            target_column=self.target_column,
         )
         self.numeric_columns = tuple(
             column for column in self.feature_columns if is_numeric_dtype(features[column])
@@ -104,7 +103,6 @@ class FeaturePreprocessor:
         features = _select_features(
             frame,
             feature_columns=self.feature_columns,
-            target_column=self.target_column,
         )
         return self._transformer.transform(features)
 
@@ -133,9 +131,8 @@ def prepare_feature_frame(
     features = _select_features(
         frame,
         feature_columns=feature_columns,
-        target_column=target_column,
     )
-    target = frame[target_column].copy()
+    target = _select_target(frame, target_column=target_column)
     return PreparedFeatureFrame(features=features, target=target)
 
 
@@ -154,12 +151,18 @@ def _select_features(
     frame: pd.DataFrame,
     *,
     feature_columns: tuple[str, ...],
-    target_column: str,
 ) -> pd.DataFrame:
-    required_columns = set(feature_columns) | {target_column}
-    missing_columns = sorted(required_columns.difference(frame.columns))
+    missing_columns = sorted(set(feature_columns).difference(frame.columns))
     if missing_columns:
         raise FeaturePreparationError(
             f"Feature frame is missing required columns: {missing_columns}"
         )
     return frame.loc[:, list(feature_columns)].copy()
+
+
+def _select_target(frame: pd.DataFrame, *, target_column: str) -> pd.Series:
+    if target_column not in frame.columns:
+        raise FeaturePreparationError(
+            f"Training frame is missing required target column: {target_column}"
+        )
+    return frame[target_column].copy()

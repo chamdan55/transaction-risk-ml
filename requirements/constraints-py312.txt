@@ -1,0 +1,19 @@
+# Direct dependency constraints for the supported Python 3.12 environment.
+# Refresh this file deliberately when upgrading the runtime; CI still resolves and tests the
+# transitive dependency graph from pyproject.toml.
+fastapi==0.141.1
+httpx==0.28.1
+joblib==1.6.0
+mlflow==3.16.1
+pandas==2.3.3
+pandera==0.33.1
+pyarrow==22.0.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+pyyaml==6.0.3
+pyspark==4.2.0
+pytest==8.4.2
+ruff==0.16.7
+scikit-learn==1.9.1
+uvicorn==0.52.4
+xgboost==2.1.4

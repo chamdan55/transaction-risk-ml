@@ -39,8 +39,9 @@ def test_random_forest_trains_and_predicts(train_frame):
     )
 
     assert model.model_name == "random_forest"
-    assert model.predict_proba(train_frame).shape == (len(train_frame), 2)
-    assert model.predict(train_frame).shape == (len(train_frame),)
+    serving_frame = train_frame.loc[:, list(FEATURE_COLUMNS)]
+    assert model.predict_proba(serving_frame).shape == (len(train_frame), 2)
+    assert model.predict(serving_frame).shape == (len(train_frame),)
 
 
 @pytest.mark.skipif(
@@ -56,5 +57,6 @@ def test_xgboost_trains_and_predicts(train_frame):
     )
 
     assert model.model_name == "xgboost"
-    assert model.predict_proba(train_frame).shape == (len(train_frame), 2)
-    assert model.predict(train_frame).shape == (len(train_frame),)
+    serving_frame = train_frame.loc[:, list(FEATURE_COLUMNS)]
+    assert model.predict_proba(serving_frame).shape == (len(train_frame), 2)
+    assert model.predict(serving_frame).shape == (len(train_frame),)

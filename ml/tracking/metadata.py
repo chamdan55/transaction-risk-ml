@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ml.tracking.client import TrackingClientError
+from ml.tracking.lineage import DatasetManifest, build_dataset_manifest
 
 
 @dataclass(frozen=True)
@@ -25,11 +26,16 @@ class RunMetadata:
     config_hash: str
     git_commit: str
     training_timestamp: str
+    feature_contract_version: str = "unknown"
+    dataset_manifest: DatasetManifest | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON- and MLflow-compatible mapping."""
 
-        return asdict(self)
+        payload = asdict(self)
+        if self.dataset_manifest is not None:
+            payload["dataset_manifest"] = self.dataset_manifest.as_dict()
+        return payload
 
 
 def build_run_metadata(
@@ -39,6 +45,8 @@ def build_run_metadata(
     config_path: str | Path,
     dataset_name: str = "paysim",
     repository_root: str | Path | None = None,
+    feature_contract_version: str = "unknown",
+    dataset_path: str | Path | None = None,
 ) -> RunMetadata:
     """Build traceability metadata from the training contract and config."""
 
@@ -60,6 +68,17 @@ def build_run_metadata(
     config_file = Path(config_path)
     if not config_file.is_file():
         raise TrackingClientError(f"Configuration file not found: {config_file}")
+    manifest = None
+    if dataset_path is not None:
+        manifest = build_dataset_manifest(
+            dataset_summary=dataset_summary,
+            dataset_path=dataset_path,
+            config_path=config_file,
+            dataset_name=dataset_name,
+            target_column=target_column,
+            feature_contract_version=feature_contract_version,
+            repository_root=repository_root,
+        )
     return RunMetadata(
         dataset_name=dataset_name,
         target_column=target_column,
@@ -70,6 +89,8 @@ def build_run_metadata(
         config_hash=_hash_file(config_file),
         git_commit=_get_git_commit(repository_root or config_file.parent),
         training_timestamp=datetime.now(UTC).isoformat(),
+        feature_contract_version=feature_contract_version,
+        dataset_manifest=manifest,
     )
 
 

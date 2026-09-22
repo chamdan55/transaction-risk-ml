@@ -4,6 +4,7 @@ from ml.evaluation.threshold import (
     analyze_thresholds,
     select_best_threshold,
     select_business_threshold,
+    select_threshold,
 )
 
 
@@ -37,3 +38,21 @@ def test_threshold_analysis_rejects_invalid_thresholds_and_costs():
         analyze_thresholds([0, 1], [0.2, 0.8], [0.8, 0.2])
     with pytest.raises(ValueError, match="must not be negative"):
         analyze_thresholds([0, 1], [0.2, 0.8], [0.5], false_positive_cost=-1)
+
+
+def test_threshold_strategy_selects_business_cost_with_recall_constraint():
+    evaluations = analyze_thresholds(
+        [0, 0, 1, 1],
+        [0.05, 0.40, 0.60, 0.90],
+        [0.5, 0.8],
+        false_positive_cost=1,
+        false_negative_cost=5,
+    )
+
+    selected = select_threshold(
+        evaluations,
+        strategy="business_cost",
+        minimum_recall=0.75,
+    )
+
+    assert selected.metrics.threshold == 0.5

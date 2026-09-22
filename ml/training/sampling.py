@@ -24,6 +24,20 @@ class SamplingSummary:
         return asdict(self)
 
 
+def summarize_rows(
+    df: DataFrame,
+    *,
+    target_column: str,
+    max_rows: int,
+) -> SamplingSummary:
+    """Summarize a split without materializing it in the driver."""
+
+    if max_rows < 1:
+        raise ValueError("max_rows must be at least 1")
+    source_counts = _count_rows_by_target(df, target_column)
+    return _build_summary(source_counts, source_counts, max_rows)
+
+
 def retain_all_positives_and_sample_negatives(
     df: DataFrame,
     *,
@@ -99,11 +113,19 @@ def deterministically_sample_rows(
     target_column: str,
     max_rows: int,
     random_seed: int,
+    strategy: str = "exact",
 ) -> tuple[DataFrame, SamplingSummary]:
-    """Cap an evaluation split without changing its class distribution by design."""
+    """Cap an evaluation split deterministically.
+
+    ``exact`` uses a global hash ordering because callers explicitly request an exact row cap.
+    ``hash`` uses a distributed hash predicate and is preferred when ``max_rows`` is a target
+    rather than a hard business limit; its returned summary records the actual retained count.
+    """
 
     if max_rows < 1:
         raise ValueError("max_rows must be at least 1")
+    if strategy not in {"exact", "hash"}:
+        raise ValueError("strategy must be either 'exact' or 'hash'")
     if target_column not in df.columns or "transaction_id" not in df.columns:
         raise ValueError("Sampling requires target_column and transaction_id")
 
@@ -115,6 +137,21 @@ def deterministically_sample_rows(
         F.concat_ws("||", F.col("transaction_id"), F.lit(str(random_seed))),
         256,
     )
+    if strategy == "hash":
+        threshold = max(1, int(max_rows / source_counts["row_count"] * 1_000_000))
+        sampled_df = (
+            df.withColumn("_sampling_hash", F.pmod(F.xxhash64(stable_order), F.lit(1_000_000)))
+            .filter(F.col("_sampling_hash") < threshold)
+            .drop("_sampling_hash")
+        )
+        return sampled_df, _build_summary(
+            source_counts,
+            _count_rows_by_target(sampled_df, target_column),
+            max_rows,
+        )
+
+    # Exact caps require a global ordering; this path is intentionally explicit and is reserved
+    # for training caps where the retained row count is part of the reproducibility contract.
     sampled_df = (
         df.withColumn("_sampling_rank", F.row_number().over(Window.orderBy(stable_order)))
         .filter(F.col("_sampling_rank") <= max_rows)

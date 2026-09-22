@@ -42,7 +42,6 @@ def test_preprocessor_fits_train_and_handles_unseen_categories(train_frame):
         {
             "amount_log": [3.0],
             "transaction_type": ["CASH_OUT"],
-            "is_fraud": [0],
         }
     )
     validation_matrix = preprocessor.transform(validation_frame)
@@ -65,3 +64,12 @@ def test_preprocessor_rejects_missing_columns(train_frame):
 
     with pytest.raises(FeaturePreparationError, match="missing required columns"):
         preprocessor.fit(train_frame.drop(columns=["transaction_type"]))
+
+
+def test_prepare_feature_frame_requires_target_only_for_training_data(train_frame):
+    with pytest.raises(FeaturePreparationError, match="required target column"):
+        prepare_feature_frame(
+            train_frame.drop(columns=["is_fraud"]),
+            feature_columns=FEATURE_COLUMNS,
+            target_column="is_fraud",
+        )

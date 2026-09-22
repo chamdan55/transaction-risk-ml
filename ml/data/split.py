@@ -4,8 +4,8 @@ from math import isclose
 from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
+from ml.contracts.features import MODEL_FEATURE_COLUMNS
 from ml.data.constants import VALID_BINARY_LABELS
-from ml.features.schema import FEATURE_SCHEMA
 
 TARGET_COLUMN = "is_fraud"
 IDENTIFIER_COLUMNS = (
@@ -15,9 +15,20 @@ IDENTIFIER_COLUMNS = (
     "timestamp",
 )
 METADATA_COLUMNS = (*IDENTIFIER_COLUMNS, "is_flagged_fraud")
-MODEL_FEATURE_COLUMNS = tuple(
-    column for column in FEATURE_SCHEMA.names if column not in (*METADATA_COLUMNS, TARGET_COLUMN)
-)
+MODEL_DATASET_COLUMNS = ("transaction_id", *MODEL_FEATURE_COLUMNS, TARGET_COLUMN)
+
+__all__ = [
+    "IDENTIFIER_COLUMNS",
+    "METADATA_COLUMNS",
+    "MODEL_DATASET_COLUMNS",
+    "MODEL_FEATURE_COLUMNS",
+    "SplitValidationResult",
+    "TARGET_COLUMN",
+    "chronological_split",
+    "project_model_dataset",
+    "validate_split_datasets",
+    "validate_split_ratios",
+]
 
 
 @dataclass(frozen=True)
@@ -28,6 +39,7 @@ class SplitValidationResult:
     test_row_count: int
     invalid_target_count: int
     duplicate_transaction_id_count: int
+    time_ranges: dict[str, dict[str, str | None]] | None = None
 
     @property
     def is_valid(self) -> bool:
@@ -57,18 +69,57 @@ def chronological_split(
     train_ratio: float,
     validation_ratio: float,
     test_ratio: float,
+    *,
+    strategy: str = "exact",
+    quantile_relative_error: float = 0.01,
 ) -> dict[str, DataFrame]:
-    """Split transactions chronologically and deterministically."""
+    """Split transactions chronologically and deterministically.
+
+    ``exact`` preserves exact row-count boundaries with a global ordering window.  It is the
+    compatibility/default mode because it is the only mode that guarantees the requested ratios
+    for every input.  ``time_boundary`` uses distributed timestamp quantiles and avoids the global
+    row-number window for normal data; it falls back to ``exact`` when duplicate timestamps would
+    create an empty partition.
+    """
     validate_split_ratios(train_ratio, validation_ratio, test_ratio)
+    if strategy not in {"exact", "time_boundary"}:
+        raise ValueError("strategy must be either 'exact' or 'time_boundary'")
+    if not 0 <= quantile_relative_error <= 1:
+        raise ValueError("quantile_relative_error must be between 0 and 1")
 
     required_columns = {"transaction_id", "timestamp"}
     missing_columns = required_columns - set(df.columns)
     if missing_columns:
         raise ValueError(f"Missing split columns: {sorted(missing_columns)}")
 
+    if strategy == "time_boundary":
+        return _chronological_split_by_time_boundaries(
+            df,
+            train_ratio=train_ratio,
+            validation_ratio=validation_ratio,
+            quantile_relative_error=quantile_relative_error,
+        )
+
     row_count = df.count()
     if row_count < 3:
         raise ValueError("At least three rows are required for a three-way split.")
+
+    return _chronological_split_exact(
+        df,
+        row_count=row_count,
+        train_ratio=train_ratio,
+        validation_ratio=validation_ratio,
+    )
+
+
+def _chronological_split_exact(
+    df: DataFrame,
+    *,
+    row_count: int,
+    train_ratio: float,
+    validation_ratio: float,
+) -> dict[str, DataFrame]:
+    """Use a global order only when exact row boundaries are required."""
 
     train_end = int(row_count * train_ratio)
     validation_end = train_end + int(row_count * validation_ratio)
@@ -99,6 +150,63 @@ def chronological_split(
     }
 
 
+def _chronological_split_by_time_boundaries(
+    df: DataFrame,
+    *,
+    train_ratio: float,
+    validation_ratio: float,
+    quantile_relative_error: float,
+) -> dict[str, DataFrame]:
+    """Split by distributed timestamp quantiles, with a correctness fallback."""
+
+    quantiles = df.select(
+        F.col("timestamp").cast("double").alias("_timestamp_epoch")
+    ).approxQuantile(
+        "_timestamp_epoch",
+        [train_ratio, train_ratio + validation_ratio],
+        relativeError=quantile_relative_error,
+    )
+    if len(quantiles) != 2 or quantiles[0] >= quantiles[1]:
+        return _chronological_split_exact(
+            df,
+            row_count=df.count(),
+            train_ratio=train_ratio,
+            validation_ratio=validation_ratio,
+        )
+
+    train_cutoff, validation_cutoff = quantiles
+    splits = {
+        "train": df.filter(F.col("timestamp").cast("double") <= train_cutoff),
+        "validation": df.filter(
+            (F.col("timestamp").cast("double") > train_cutoff)
+            & (F.col("timestamp").cast("double") <= validation_cutoff)
+        ),
+        "test": df.filter(F.col("timestamp").cast("double") > validation_cutoff),
+    }
+    if any(split.limit(1).count() == 0 for split in splits.values()):
+        return _chronological_split_exact(
+            df,
+            row_count=df.count(),
+            train_ratio=train_ratio,
+            validation_ratio=validation_ratio,
+        )
+    return splits
+
+
+def project_model_dataset(df: DataFrame) -> DataFrame:
+    """Project an audit feature frame to the model-ready dataset contract.
+
+    ``transaction_id`` is retained solely for split integrity checks and ``is_fraud`` remains the
+    target. Neither is passed to the model preprocessor. Post-event, historical, account, and
+    proxy-label fields are intentionally dropped from the persisted training splits.
+    """
+
+    missing_columns = sorted(set(MODEL_DATASET_COLUMNS).difference(df.columns))
+    if missing_columns:
+        raise ValueError(f"Model dataset is missing required columns: {missing_columns}")
+    return df.select(*MODEL_DATASET_COLUMNS)
+
+
 def validate_split_datasets(
     all_df: DataFrame,
     splits: dict[str, DataFrame],
@@ -115,10 +223,34 @@ def validate_split_datasets(
     if not (train_df.schema == validation_df.schema == test_df.schema == all_df.schema):
         raise ValueError("Split schemas must match the all-feature dataset schema.")
 
-    row_counts = {name: frame.count() for name, frame in splits.items()}
+    tagged_splits = [
+        frame.select(
+            "transaction_id",
+            "timestamp",
+            TARGET_COLUMN,
+            F.lit(name).alias("_split_name"),
+        )
+        for name, frame in splits.items()
+    ]
+    split_stats = (
+        tagged_splits[0]
+        .unionByName(tagged_splits[1])
+        .unionByName(tagged_splits[2])
+        .groupBy("_split_name")
+        .agg(
+            F.count(F.lit(1)).alias("row_count"),
+            F.sum(F.when(~F.col(TARGET_COLUMN).isin(*VALID_BINARY_LABELS), 1).otherwise(0)).alias(
+                "invalid_target_count"
+            ),
+            F.min("timestamp").alias("min_timestamp"),
+            F.max("timestamp").alias("max_timestamp"),
+        )
+        .collect()
+    )
+    stats_by_name = {row["_split_name"]: row for row in split_stats}
+    row_counts = {name: int(stats_by_name[name]["row_count"] or 0) for name in splits}
     invalid_target_count = sum(
-        frame.filter(~F.col(TARGET_COLUMN).isin(*VALID_BINARY_LABELS)).count()
-        for frame in splits.values()
+        int(stats_by_name[name]["invalid_target_count"] or 0) for name in splits
     )
 
     combined_ids = (
@@ -130,10 +262,10 @@ def validate_split_datasets(
         combined_ids.groupBy("transaction_id").count().filter(F.col("count") > 1).count()
     )
 
-    train_max = train_df.select(F.max("timestamp")).first()[0]
-    validation_min = validation_df.select(F.min("timestamp")).first()[0]
-    validation_max = validation_df.select(F.max("timestamp")).first()[0]
-    test_min = test_df.select(F.min("timestamp")).first()[0]
+    train_max = stats_by_name["train"]["max_timestamp"]
+    validation_min = stats_by_name["validation"]["min_timestamp"]
+    validation_max = stats_by_name["validation"]["max_timestamp"]
+    test_min = stats_by_name["test"]["min_timestamp"]
 
     if train_max > validation_min or validation_max > test_min:
         raise ValueError("Split timestamp boundaries are not chronological.")
@@ -145,4 +277,19 @@ def validate_split_datasets(
         test_row_count=row_counts["test"],
         invalid_target_count=invalid_target_count,
         duplicate_transaction_id_count=duplicate_transaction_id_count,
+        time_ranges={
+            name: {
+                "min": (
+                    str(stats_by_name[name]["min_timestamp"])
+                    if stats_by_name[name]["min_timestamp"] is not None
+                    else None
+                ),
+                "max": (
+                    str(stats_by_name[name]["max_timestamp"])
+                    if stats_by_name[name]["max_timestamp"] is not None
+                    else None
+                ),
+            }
+            for name in splits
+        },
     )

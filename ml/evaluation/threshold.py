@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any
 
 from ml.evaluation.metrics import (
@@ -10,6 +11,8 @@ from ml.evaluation.metrics import (
     EvaluationError,
     evaluate_binary_predictions,
 )
+
+SUPPORTED_THRESHOLD_SELECTION_STRATEGIES = frozenset({"metric", "business_cost"})
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,29 @@ def select_business_threshold(
     )
 
 
+def select_threshold(
+    evaluations: tuple[ThresholdEvaluation, ...] | list[ThresholdEvaluation],
+    *,
+    strategy: str = "metric",
+    metric: str = "f1",
+    minimum_recall: float | None = None,
+) -> ThresholdEvaluation:
+    """Select a threshold using an explicit metric or business-cost policy."""
+
+    if strategy not in SUPPORTED_THRESHOLD_SELECTION_STRATEGIES:
+        raise EvaluationError(
+            "Unsupported threshold selection strategy: "
+            f"{strategy}; expected one of {sorted(SUPPORTED_THRESHOLD_SELECTION_STRATEGIES)}"
+        )
+    if strategy == "business_cost":
+        return select_business_threshold(evaluations, minimum_recall=minimum_recall)
+    return select_best_threshold(
+        evaluations,
+        metric=metric,
+        minimum_recall=minimum_recall,
+    )
+
+
 def _evaluate_threshold(
     y_true: Any,
     y_probability: Any,
@@ -132,5 +158,5 @@ def _filter_by_recall(
 
 
 def _validate_cost(name: str, value: float) -> None:
-    if value < 0:
+    if not isinstance(value, (int, float)) or not isfinite(float(value)) or value < 0:
         raise EvaluationError(f"{name} must not be negative")

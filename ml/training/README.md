@@ -18,8 +18,11 @@ Folder ini berisi kontrak dataset dan komponen training Sprint 2.
 - Test hanya digunakan untuk final evaluation.
 - Seed dan model parameters berasal dari `configs/model.yaml`.
 - Model artifacts disimpan di `artifacts/models/` dan tidak di-commit.
-- Sebelum data dipindahkan ke pandas, seluruh fraud dipertahankan hanya pada
-  train split dan non-fraud di-sample secara deterministik. Validation/test
-  menggunakan sample deterministik yang representatif agar prevalensi fraud tidak
-  sengaja diubah. Batas `training.sampling.max_rows` mencegah full PaySim
-  dimaterialisasi seluruhnya ke RAM driver.
+- Strategi imbalance dipilih eksplisit: `negative_sampling`, `class_weight`, atau `none`; pipeline
+  menolak kombinasi negative sampling dengan balanced estimator weights.
+- Strategi evaluasi default adalah `full`, sehingga validation/test tidak dipotong sebelum final
+  evaluation. `exact` dan `hash` tersedia sebagai profil sampling eksplisit bila resource driver
+  memang memerlukannya.
+- Pada strategi `negative_sampling`, seluruh fraud dipertahankan dan non-fraud train di-sample
+  deterministik sebelum data dipindahkan ke pandas. Batas `training.sampling.max_rows` mengontrol
+  ukuran training driver.

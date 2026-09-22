@@ -18,3 +18,14 @@ split:
   train_ratio: 0.70
   validation_ratio: 0.15
   test_ratio: 0.15
+  # exact preserves row-count boundaries; time_boundary avoids global row_number for large data.
+  strategy: time_boundary
+  quantile_relative_error: 0.01
+
+spark:
+  master: local[2]
+  driver_memory: 16g          # hanya bila RAM host mencukupi
+  shuffle_partitions: 32
+  default_parallelism: 8
+  output_partitions: 8
+  persist_intermediates: false

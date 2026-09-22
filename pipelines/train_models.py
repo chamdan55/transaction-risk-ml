@@ -13,16 +13,20 @@ import joblib
 from pyspark.sql import SparkSession
 
 from app.core.logging import setup_logging
+from ml.contracts.features import validate_model_feature_columns
 from ml.data.spark import create_spark_session
+from ml.evaluation.metrics import build_calibration_data
 from ml.evaluation.selection import (
+    CandidateValidationResult,
     FinalTestResult,
     ProductionCandidate,
     evaluate_production_candidate_on_test,
-    select_production_candidate,
+    evaluate_validation_candidates,
+    select_production_candidate_from_results,
 )
-from ml.evaluation.threshold import analyze_thresholds, select_best_threshold
-from ml.tracking.client import MlflowTrackingClient
+from ml.tracking.client import MlflowTrackingClient, TrackingClientError
 from ml.tracking.config import TrackingConfig, load_tracking_config
+from ml.tracking.lineage import DatasetManifest, build_dataset_manifest
 from ml.tracking.logging import log_training_parameters, log_validation_metrics
 from ml.tracking.metadata import build_run_metadata
 from ml.tracking.registry import load_logged_model, log_and_register_model
@@ -35,6 +39,7 @@ from ml.training.sampling import (
     SamplingSummary,
     deterministically_sample_rows,
     retain_all_positives_and_sample_negatives,
+    summarize_rows,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -76,6 +81,14 @@ def run_training_pipeline(
         config.random_seed,
     )
     bundle = load_training_dataset(spark, config.features_path)
+    lineage_manifest = build_dataset_manifest(
+        dataset_summary=bundle.summary.as_dict(),
+        dataset_path=config.features_path,
+        config_path=model_config_path,
+        target_column=config.target_column,
+        feature_contract_version=config.feature_contract_version,
+        repository_root=Path.cwd(),
+    )
     feature_columns = bundle.summary.feature_columns
     LOGGER.info(
         "Training dataset contract loaded: train=%s, validation=%s, test=%s, features=%s",
@@ -125,10 +138,22 @@ def run_training_pipeline(
         name: (validation_target, model.predict_proba(validation_frame)[:, 1])
         for name, model in models.items()
     }
-    candidate = select_production_candidate(
+    validation_results = evaluate_validation_candidates(
         validation_predictions,
         thresholds=config.thresholds,
         primary_metric=config.primary_metric,
+        threshold_metric=config.threshold_metric,
+        threshold_selection_strategy=config.threshold_selection_strategy,
+        minimum_recall=config.minimum_recall,
+        false_positive_cost=config.false_positive_cost,
+        false_negative_cost=config.false_negative_cost,
+    )
+    _log_validation_threshold_evaluations(validation_results, config)
+    candidate = select_production_candidate_from_results(
+        validation_results,
+        primary_metric=config.primary_metric,
+        threshold_selection_strategy=config.threshold_selection_strategy,
+        minimum_recall=config.minimum_recall,
     )
     LOGGER.info(
         "Production candidate selected: model=%s, threshold=%s, metric=%s, score=%s",
@@ -138,16 +163,20 @@ def run_training_pipeline(
         candidate.validation_score,
     )
     validation_report = _build_validation_report(
+        validation_results,
         validation_predictions,
         config,
     )
 
     test_target = test_frame[config.target_column]
     selected_model = models[candidate.model_name]
+    test_probability = selected_model.predict_proba(test_frame)[:, 1]
     final_result = evaluate_production_candidate_on_test(
         candidate,
         test_target,
-        selected_model.predict_proba(test_frame)[:, 1],
+        test_probability,
+        false_positive_cost=config.false_positive_cost,
+        false_negative_cost=config.false_negative_cost,
     )
     LOGGER.info(
         "Final test evaluation completed: model=%s, threshold=%s, pr_auc=%.6f, f1=%.6f",
@@ -163,10 +192,17 @@ def run_training_pipeline(
         validation_report=validation_report,
         candidate=candidate,
         final_result=final_result,
+        lineage_manifest=lineage_manifest,
+        test_calibration=build_calibration_data(
+            test_target,
+            test_probability,
+            n_bins=config.calibration_bins,
+        ),
     )
     _save_artifacts(models, config)
     LOGGER.info("Model artifacts saved: path=%s", config.model_directory)
     _write_json(config.evaluation_report, report)
+    _write_model_card(config.model_card, config=config, report=report)
     LOGGER.info("Evaluation report saved: path=%s", config.evaluation_report)
     tracking_summary = _track_training_run(
         tracking_config=tracking_config,
@@ -175,10 +211,13 @@ def run_training_pipeline(
         bundle_summary=bundle.summary.as_dict(),
         models=models,
         validation_predictions=validation_predictions,
+        validation_results=validation_results,
         candidate=candidate,
         final_result=final_result,
         report=report,
         sampling_summaries=sampling_summaries,
+        lineage_manifest=lineage_manifest,
+        input_example=_build_serving_input_example(train_frame, feature_columns),
     )
     summary = TrainingPipelineSummary(
         train_row_count=len(train_frame),
@@ -203,18 +242,47 @@ def _sample_splits_for_training(
 ) -> tuple[dict[str, Any], dict[str, SamplingSummary]]:
     sampled_splits = {}
     summaries = {}
-    for split_name in ("train", "validation", "test"):
-        sampling_function = (
-            retain_all_positives_and_sample_negatives
-            if split_name == "train"
-            else deterministically_sample_rows
-        )
-        sampled_df, summary = sampling_function(
-            bundle.by_name(split_name),
+    train_df = bundle.by_name("train")
+    if config.imbalance_strategy == "negative_sampling":
+        sampled_df, summary = retain_all_positives_and_sample_negatives(
+            train_df,
             target_column=config.target_column,
-            max_rows=config.sampling_max_rows[split_name],
+            max_rows=config.sampling_max_rows["train"],
             random_seed=config.random_seed,
         )
+    else:
+        sampled_df = train_df
+        summary = summarize_rows(
+            train_df,
+            target_column=config.target_column,
+            max_rows=config.sampling_max_rows["train"],
+        )
+    sampled_splits["train"] = sampled_df
+    summaries["train"] = summary
+    LOGGER.info("Sampling train split: %s", summary)
+
+    for split_name in ("validation", "test"):
+        split_df = bundle.by_name(split_name)
+        sampling_strategy = (
+            config.evaluation_sampling_strategy
+            if split_name == "validation"
+            else config.final_test_sampling_strategy
+        )
+        if sampling_strategy == "full":
+            sampled_df = split_df
+            summary = summarize_rows(
+                split_df,
+                target_column=config.target_column,
+                max_rows=config.sampling_max_rows[split_name],
+            )
+        else:
+            sampled_df, summary = deterministically_sample_rows(
+                split_df,
+                target_column=config.target_column,
+                max_rows=config.sampling_max_rows[split_name],
+                random_seed=config.random_seed,
+                strategy=sampling_strategy,
+            )
         sampled_splits[split_name] = sampled_df
         summaries[split_name] = summary
         LOGGER.info("Sampling %s split: %s", split_name, summary)
@@ -238,10 +306,13 @@ def _track_training_run(
     bundle_summary: dict[str, Any],
     models: dict[str, Any],
     validation_predictions: dict[str, tuple[Any, Any]],
+    validation_results: tuple[CandidateValidationResult, ...],
     candidate: ProductionCandidate,
     final_result: FinalTestResult,
     report: dict[str, Any],
     sampling_summaries: dict[str, SamplingSummary],
+    lineage_manifest: DatasetManifest,
+    input_example: Any,
 ) -> TrackingRunSummary:
     """Log comparable model runs and register only the selected candidate."""
 
@@ -254,16 +325,30 @@ def _track_training_run(
         dataset_summary=bundle_summary,
         target_column=config.target_column,
         config_path=model_config_path,
+        feature_contract_version=config.feature_contract_version,
+        repository_root=Path.cwd(),
     )
     parent_tags = {
         "project": "transaction-risk-ml",
         "stage": "training",
         "dataset_name": metadata.dataset_name,
         "git_commit": metadata.git_commit,
+        "dataset_manifest_id": lineage_manifest.manifest_id,
+        "feature_contract_version": config.feature_contract_version,
     }
     training_parameters = {
         "random_seed": config.random_seed,
         "imbalance_strategy": config.imbalance_strategy,
+        "evaluation_sampling_strategy": config.evaluation_sampling_strategy,
+        "final_test_sampling_strategy": config.final_test_sampling_strategy,
+        "false_positive_cost": config.false_positive_cost,
+        "false_negative_cost": config.false_negative_cost,
+        "business_costs_are_assumptions": config.business_costs_are_assumptions,
+        "minimum_recall": config.minimum_recall,
+        "threshold_selection_strategy": config.threshold_selection_strategy,
+        "threshold_metric": config.threshold_metric,
+        "calibration_bins": config.calibration_bins,
+        "feature_contract_version": config.feature_contract_version,
         "preprocessing": "median_imputation+standard_scaling+one_hot_encoding",
         "threshold_candidates": list(config.thresholds),
         "sampling": {
@@ -272,18 +357,20 @@ def _track_training_run(
     }
     with client.start_run(run_name="training-pipeline") as parent_run:
         client.set_tags(parent_tags)
-        for model_name in models:
+        client.log_dict(lineage_manifest.as_dict(), "lineage/dataset_manifest.json")
+        for result in validation_results:
+            model_name = result.model_name
             target, probability = validation_predictions[model_name]
-            evaluations = analyze_thresholds(target, probability, config.thresholds)
-            selected = select_best_threshold(evaluations)
             with client.start_run(run_name=model_name, nested=True):
                 client.set_tags(
                     {
                         "project": "transaction-risk-ml",
                         "stage": "validation",
                         "dataset_name": metadata.dataset_name,
-                        "candidate_status": "candidate",
+                        "candidate_status": "candidate" if result.is_eligible else "rejected",
+                        "rejection_reason": result.rejection_reason or "",
                         "git_commit": metadata.git_commit,
+                        "dataset_manifest_id": lineage_manifest.manifest_id,
                     }
                 )
                 log_training_parameters(
@@ -299,8 +386,20 @@ def _track_training_run(
                 log_validation_metrics(
                     client,
                     model_name=model_name,
-                    selected_evaluation=selected,
-                    threshold_evaluations=evaluations,
+                    selected_evaluation=result.selected_threshold,
+                    threshold_evaluations=result.threshold_evaluations,
+                    rejection_reason=result.rejection_reason,
+                )
+                client.log_dict(
+                    {
+                        "model_name": model_name,
+                        "calibration": build_calibration_data(
+                            target,
+                            probability,
+                            n_bins=config.calibration_bins,
+                        ),
+                    },
+                    f"calibration/{model_name}.json",
                 )
 
         with client.start_run(
@@ -311,16 +410,13 @@ def _track_training_run(
                     "project": "transaction-risk-ml",
                     "stage": "final",
                     "dataset_name": metadata.dataset_name,
-                    "candidate_status": "candidate",
+                    "candidate_status": "validation_pending",
                     "git_commit": metadata.git_commit,
                 }
             )
-            candidate_evaluations = analyze_thresholds(
-                validation_predictions[candidate.model_name][0],
-                validation_predictions[candidate.model_name][1],
-                config.thresholds,
-            )
-            candidate_validation = select_best_threshold(candidate_evaluations)
+            candidate_validation = _find_validation_result(validation_results, candidate.model_name)
+            if candidate_validation.selected_threshold is None:  # pragma: no cover - invariant
+                raise RuntimeError("Selected production candidate is marked rejected")
             log_training_parameters(
                 client,
                 model_name=candidate.model_name,
@@ -334,17 +430,50 @@ def _track_training_run(
             log_validation_metrics(
                 client,
                 model_name=candidate.model_name,
-                selected_evaluation=candidate_validation,
-                threshold_evaluations=candidate_evaluations,
+                selected_evaluation=candidate_validation.selected_threshold,
+                threshold_evaluations=candidate_validation.threshold_evaluations,
             )
             client.log_metrics(_final_test_metrics(final_result))
             client.log_dict(report, "evaluation/report.json")
+            client.log_dict(
+                {"markdown": config.model_card.read_text(encoding="utf-8")},
+                "governance/model_card.json",
+            )
+            client.log_dict(
+                {
+                    "feature_columns": list(lineage_manifest.feature_columns),
+                    "feature_contract_version": config.feature_contract_version,
+                    "input_example": input_example.to_dict(orient="records"),
+                },
+                "model/model_contract.json",
+            )
+            try:
+                signature = client.infer_signature(models[candidate.model_name], input_example)
+            except TrackingClientError:
+                client.set_tags(
+                    {
+                        "candidate_status": "rejected",
+                        "rejection_reason": "mlflow_signature_validation_failed",
+                    }
+                )
+                raise
+            client.log_dict(
+                {
+                    "status": "validated",
+                    "feature_contract_version": config.feature_contract_version,
+                    "input_example_columns": list(input_example.columns),
+                    "signature": signature.to_dict(),
+                },
+                "model/signature_validation.json",
+            )
             reference = log_and_register_model(
                 client,
                 models[candidate.model_name],
                 model_name=candidate.model_name,
                 artifact_path="model",
                 registered_model_name=tracking_config.registered_model_name,
+                signature=signature,
+                input_example=input_example,
                 version_tags={
                     "candidate_status": "candidate",
                     "model_name": candidate.model_name,
@@ -354,17 +483,54 @@ def _track_training_run(
                     "dataset_name": metadata.dataset_name,
                     "git_commit": metadata.git_commit,
                     "config_hash": metadata.config_hash,
+                    "dataset_manifest_id": lineage_manifest.manifest_id,
+                    "schema_fingerprint": lineage_manifest.schema_fingerprint,
+                    "content_fingerprint": lineage_manifest.content_fingerprint,
+                    "config_fingerprint": lineage_manifest.config_fingerprint,
+                    "code_fingerprint": lineage_manifest.code_fingerprint,
+                    "feature_contract_version": config.feature_contract_version,
+                    "production_threshold": str(candidate.threshold),
+                    "threshold_selection_strategy": config.threshold_selection_strategy,
+                    "evaluation_report_artifact": "evaluation/report.json",
+                    "model_card_artifact": "governance/model_card.json",
+                    "signature_validation": "passed",
+                    "serving_input_validation": "pending",
                 },
             )
             client.log_dict(reference.as_dict(), "registry/model_reference.json")
             if reference.registered_model_version is None:
                 raise RuntimeError("MLflow did not return a registered model version")
+            try:
+                _validate_logged_model_serving_input(client, reference, input_example)
+            except Exception as exc:
+                client.set_tags(
+                    {
+                        "candidate_status": "rejected",
+                        "rejection_reason": "logged_model_serving_validation_failed",
+                    }
+                )
+                client.set_model_version_tags(
+                    registered_model_name=tracking_config.registered_model_name,
+                    version=reference.registered_model_version,
+                    tags={
+                        "candidate_status": "rejected",
+                        "serving_input_validation": "failed",
+                    },
+                )
+                raise RuntimeError(
+                    "Logged candidate model failed feature-only serving input validation"
+                ) from exc
+            client.set_model_version_tags(
+                registered_model_name=tracking_config.registered_model_name,
+                version=reference.registered_model_version,
+                tags={"serving_input_validation": "passed"},
+            )
+            client.set_tags({"candidate_status": "candidate"})
             client.set_model_alias(
                 registered_model_name=tracking_config.registered_model_name,
                 alias="candidate",
                 version=reference.registered_model_version,
             )
-            load_logged_model(client, reference)
             return TrackingRunSummary(
                 parent_run_id=parent_run.info.run_id,
                 candidate_run_id=candidate_run.info.run_id,
@@ -380,23 +546,115 @@ def _final_test_metrics(result: FinalTestResult) -> dict[str, float]:
         "test.f1": metrics.f1,
         "test.roc_auc": metrics.roc_auc,
         "test.pr_auc": metrics.pr_auc,
+        "test.brier_score": metrics.brier_score,
+        "test.alert_rate": metrics.alert_rate,
+        "test.expected_cost": result.expected_cost,
         "test.selected_threshold": metrics.threshold,
     }
 
 
+def _find_validation_result(
+    validation_results: tuple[CandidateValidationResult, ...], model_name: str
+) -> CandidateValidationResult:
+    for result in validation_results:
+        if result.model_name == model_name:
+            return result
+    raise RuntimeError(f"Missing validation result for selected model: {model_name}")
+
+
+def _build_serving_input_example(train_frame: Any, feature_columns: tuple[str, ...]) -> Any:
+    """Build a feature-only example with nullable numeric columns represented as floats."""
+
+    input_example = train_frame.loc[:, list(feature_columns)].head(2).copy()
+    for column in input_example.select_dtypes(include="number").columns:
+        input_example[column] = input_example[column].astype("float64")
+    return input_example
+
+
+def _validate_logged_model_serving_input(
+    client: MlflowTrackingClient,
+    reference: Any,
+    input_example: Any,
+) -> None:
+    """Ensure the registered bundle accepts the exact feature-only MLflow example."""
+
+    loaded_model = load_logged_model(client, reference)
+    probabilities = loaded_model.predict_proba(input_example)
+    predictions = loaded_model.predict(input_example)
+    if len(probabilities) != len(input_example) or len(predictions) != len(input_example):
+        raise RuntimeError("Loaded model returned a prediction count different from input rows")
+
+
 def _build_validation_report(
-    validation_predictions: dict[str, tuple[Any, Any]], config: ModelConfig
+    validation_results: tuple[CandidateValidationResult, ...],
+    validation_predictions: dict[str, tuple[Any, Any]],
+    config: ModelConfig,
 ) -> dict[str, Any]:
-    report = {}
-    for model_name, (target, probability) in validation_predictions.items():
-        evaluations = analyze_thresholds(target, probability, config.thresholds)
-        selected = select_best_threshold(evaluations)
-        report[model_name] = {
-            "selected_threshold": selected.metrics.threshold,
-            "metrics": selected.metrics.as_dict(),
-            "expected_cost": selected.expected_cost,
+    report: dict[str, Any] = {}
+    for result in validation_results:
+        target, probability = validation_predictions[result.model_name]
+        report[result.model_name] = {
+            **result.as_dict(),
+            "calibration": build_calibration_data(
+                target,
+                probability,
+                n_bins=config.calibration_bins,
+            ),
         }
     return report
+
+
+def _log_validation_threshold_evaluations(
+    validation_results: tuple[CandidateValidationResult, ...], config: ModelConfig
+) -> None:
+    """Log validation metrics before the production quality gate is applied.
+
+    The pipeline deliberately stops when no threshold meets ``minimum_recall``.
+    Emitting the complete threshold analysis first keeps that failure actionable
+    in a local console or centralized log stream.
+    """
+
+    LOGGER.info(
+        "Validation threshold evaluation started: strategy=%s, minimum_recall=%s, thresholds=%s",
+        config.threshold_selection_strategy,
+        config.minimum_recall,
+        config.thresholds,
+    )
+    for result in validation_results:
+        ranking_metrics = result.threshold_evaluations[0].metrics
+        LOGGER.info(
+            "Validation model ranking: model=%s, roc_auc=%.6f, pr_auc=%.6f, brier_score=%.6f",
+            result.model_name,
+            ranking_metrics.roc_auc,
+            ranking_metrics.pr_auc,
+            ranking_metrics.brier_score,
+        )
+        for evaluation in result.threshold_evaluations:
+            metrics = evaluation.metrics
+            passes_recall_gate = (
+                config.minimum_recall is None or metrics.recall >= config.minimum_recall
+            )
+            LOGGER.info(
+                "Validation threshold: model=%s, threshold=%.4f, precision=%.6f, "
+                "recall=%.6f, f1=%.6f, alert_rate=%.6f, expected_cost=%.2f, "
+                "recall_gate=%s",
+                result.model_name,
+                metrics.threshold,
+                metrics.precision,
+                metrics.recall,
+                metrics.f1,
+                metrics.alert_rate,
+                evaluation.expected_cost,
+                "PASS" if passes_recall_gate else "FAIL",
+            )
+        if not result.is_eligible:
+            LOGGER.warning(
+                "Validation quality gate unmet: model=%s, minimum_recall=%.6f, "
+                "maximum_candidate_recall=%.6f",
+                result.model_name,
+                config.minimum_recall,
+                result.maximum_candidate_recall,
+            )
 
 
 def _build_report(
@@ -407,27 +665,52 @@ def _build_report(
     validation_report: dict[str, Any],
     candidate: ProductionCandidate,
     final_result: FinalTestResult,
+    lineage_manifest: DatasetManifest,
+    test_calibration: list[dict[str, float | int]],
 ) -> dict[str, Any]:
     return {
         "config": {
             "target_column": config.target_column,
+            "feature_contract_version": config.feature_contract_version,
             "random_seed": config.random_seed,
             "primary_metric": config.primary_metric,
+            "imbalance_strategy": config.imbalance_strategy,
+            "evaluation_sampling_strategy": config.evaluation_sampling_strategy,
+            "final_test_sampling_strategy": config.final_test_sampling_strategy,
+            "false_positive_cost": config.false_positive_cost,
+            "false_negative_cost": config.false_negative_cost,
+            "business_costs_are_assumptions": config.business_costs_are_assumptions,
+            "minimum_recall": config.minimum_recall,
+            "threshold_selection_strategy": config.threshold_selection_strategy,
+            "threshold_metric": config.threshold_metric,
+            "calibration_bins": config.calibration_bins,
             "thresholds": list(config.thresholds),
         },
         "dataset": bundle_summary,
+        "lineage": lineage_manifest.stable_dict(),
         "sampling": {
             split_name: summary.as_dict() for split_name, summary in sampling_summaries.items()
         },
         "validation": validation_report,
         "candidate": candidate.as_dict(),
-        "test": final_result.metrics.as_dict(),
+        "test": {
+            **final_result.metrics.as_dict(),
+            "expected_cost": final_result.expected_cost,
+            "calibration": test_calibration,
+            "sampling_policy": config.final_test_sampling_strategy,
+        },
     }
 
 
 def _save_artifacts(models: dict[str, Any], config: ModelConfig) -> None:
     config.model_directory.mkdir(parents=True, exist_ok=True)
     for model_name, model in models.items():
+        try:
+            validate_model_feature_columns(tuple(model.preprocessor.feature_columns))
+        except (AttributeError, ValueError) as exc:
+            raise ValueError(
+                f"Model artifact {model_name} does not use the approved feature contract"
+            ) from exc
         joblib.dump(model, config.model_directory / f"{model_name}.joblib")
 
 
@@ -437,6 +720,47 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         json.dumps(payload, indent=2, sort_keys=True, default=str),
         encoding="utf-8",
     )
+
+
+def _write_model_card(path: Path, *, config: ModelConfig, report: dict[str, Any]) -> None:
+    """Write a concise, versionable governance summary without auto-promotion claims."""
+
+    candidate = report["candidate"]
+    test = report["test"]
+    assumptions = "assumption" if config.business_costs_are_assumptions else "business-approved"
+    content = f"""# Transaction Risk Model Card
+
+## Intended use
+
+- Candidate model: `{candidate["model_name"]}`
+- Feature contract: `{config.feature_contract_version}`
+- Primary selection metric: `{config.primary_metric}`
+- Threshold policy: `{config.threshold_selection_strategy}` (`{config.threshold_metric}`)
+- Final test sampling: `{config.final_test_sampling_strategy}`
+
+## Validation and final test
+
+- Selected threshold: `{candidate["threshold"]}`
+- Validation score: `{candidate["validation_score"]}`
+- Final test PR-AUC: `{test["pr_auc"]}`
+- Final test ROC-AUC: `{test["roc_auc"]}`
+- Final test precision/recall/F1: `{test["precision"]}` / `{test["recall"]}` / `{test["f1"]}`
+- Final test Brier score: `{test["brier_score"]}`
+- Final test alert rate: `{test["alert_rate"]}`
+- Final test expected cost: `{test["expected_cost"]}`
+
+## Business assumptions and limitations
+
+- False-positive cost: `{config.false_positive_cost}` ({assumptions}).
+- False-negative cost: `{config.false_negative_cost}` ({assumptions}).
+- Minimum recall constraint: `{config.minimum_recall}`.
+- Calibration must be reviewed before interpreting scores as probabilities; calibration bins are
+  included in the evaluation report.
+- The test set is evaluated once after validation-based model and threshold selection.
+- This artifact is a candidate model card. It does not authorize automatic production promotion.
+"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
 
 
 def _parse_args() -> argparse.Namespace:

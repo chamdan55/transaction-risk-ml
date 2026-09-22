@@ -28,13 +28,22 @@ jobs:
       - name: Install project
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[training,tracking,dev]" -c requirements/constraints-py312.txt
 
       - name: Run Ruff check
         run: ruff check .
 
       - name: Check formatting
         run: ruff format --check .
+
+      - name: Build wheel
+        run: python -m build --wheel --outdir dist
+
+      - name: Clean-install wheel smoke test
+        working-directory: /tmp
+        run: |
+          python -m pip install --force-reinstall --no-deps "$GITHUB_WORKSPACE"/dist/*.whl
+          python -c "import app, ml, pipelines; from ml.contracts import MODEL_FEATURE_COLUMNS; assert MODEL_FEATURE_COLUMNS"
 
       - name: Run tests
         run: pytest

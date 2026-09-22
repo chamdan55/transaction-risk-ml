@@ -52,6 +52,7 @@ def test_training_dataset_contract_loads_all_splits_and_builds_summary(
         spark,
         tmp_path,
         model_feature_columns=MODEL_FEATURES,
+        allow_custom_feature_columns=True,
     )
 
     assert bundle.summary.feature_columns == MODEL_FEATURES
@@ -86,6 +87,7 @@ def test_training_dataset_contract_rejects_missing_required_column(spark: SparkS
             spark,
             tmp_path,
             model_feature_columns=MODEL_FEATURES,
+            allow_custom_feature_columns=True,
         )
 
 
@@ -105,6 +107,7 @@ def test_training_dataset_contract_rejects_duplicate_transaction_ids(spark: Spar
             spark,
             tmp_path,
             model_feature_columns=MODEL_FEATURES,
+            allow_custom_feature_columns=True,
         )
 
 
@@ -127,4 +130,5 @@ def test_training_dataset_contract_rejects_overlap_between_splits(spark: SparkSe
             spark,
             tmp_path,
             model_feature_columns=MODEL_FEATURES,
+            allow_custom_feature_columns=True,
         )

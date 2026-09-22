@@ -1,7 +1,9 @@
 from contextlib import contextmanager
 from types import SimpleNamespace
 
-from ml.tracking.client import MlflowTrackingClient
+import pytest
+
+from ml.tracking.client import MlflowTrackingClient, TrackingClientError
 from ml.tracking.config import TrackingConfig
 
 
@@ -38,8 +40,8 @@ class FakeMlflow:
         logged = None
 
         @classmethod
-        def log_model(cls, model, artifact_path, registered_model_name, serialization_format):
-            cls.logged = (model, artifact_path, registered_model_name, serialization_format)
+        def log_model(cls, model, name, registered_model_name, serialization_format):
+            cls.logged = (model, name, registered_model_name, serialization_format)
             return SimpleNamespace(
                 model_uri="runs:/run-1/model",
                 registered_model_version="1",
@@ -48,6 +50,11 @@ class FakeMlflow:
         @classmethod
         def load_model(cls, model_uri):
             return {"model_uri": model_uri}
+
+    class models:
+        @staticmethod
+        def infer_signature(input_example, output):
+            return {"input": input_example, "output": output}
 
     @contextmanager
     def start_run(self, **kwargs):
@@ -80,3 +87,32 @@ def test_tracking_client_configures_experiment_and_starts_run():
         "run_name": "baseline",
         "nested": False,
     }
+
+
+def test_tracking_client_infers_signature_from_feature_only_input():
+    fake_mlflow = FakeMlflow()
+    client = MlflowTrackingClient(
+        TrackingConfig("mlruns", "fraud", "risk-model", "mlartifacts"),
+        _mlflow=fake_mlflow,
+    )
+    input_example = {"amount": [100.0], "transaction_type": ["PAYMENT"]}
+    model = SimpleNamespace(predict_proba=lambda frame: [[0.9, 0.1]])
+
+    signature = client.infer_signature(model, input_example)
+
+    assert signature["input"] == input_example
+    assert signature["output"] == [[0.9, 0.1]]
+
+
+def test_tracking_client_preserves_signature_inference_failure_reason():
+    fake_mlflow = FakeMlflow()
+    client = MlflowTrackingClient(
+        TrackingConfig("mlruns", "fraud", "risk-model", "mlartifacts"),
+        _mlflow=fake_mlflow,
+    )
+    model = SimpleNamespace(
+        predict_proba=lambda _frame: (_ for _ in ()).throw(ValueError("feature-only failure"))
+    )
+
+    with pytest.raises(TrackingClientError, match="feature-only failure"):
+        client.infer_signature(model, {"amount": [100.0]})

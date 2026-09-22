@@ -15,31 +15,47 @@ authors = [
 ]
 
 dependencies = [
-    "mlflow>=2.10,<4.0",
-    "scikit-learn>=1.2,<2.0",
-    "xgboost>=2.0,<3.0",
     "fastapi>=0.115,<1.0",
     "uvicorn[standard]>=0.34,<1.0",
     "pydantic>=2.10,<3.0",
     "pydantic-settings>=2.7,<3.0",
-    "pyspark>=4.0,<5.0",
-    "pandas>=2.2,<3.0",
-    "pyarrow>=18,<23",
-    "pandera>=0.26,<1.0",
     "pyyaml>=6.0,<7.0",
 ]
 
 [project.optional-dependencies]
+serving = [
+    "joblib>=1.4,<2.0",
+    "pandas>=2.2,<3.0",
+    "scikit-learn>=1.2,<2.0",
+    "xgboost>=2.0,<3.0",
+]
+training = [
+    "joblib>=1.4,<2.0",
+    "scikit-learn>=1.2,<2.0",
+    "xgboost>=2.0,<3.0",
+    "pyspark>=4.0,<5.0",
+    "pandas>=2.2,<3.0",
+    "pyarrow>=18,<23",
+]
+tracking = [
+    "mlflow>=3.0,<4.0",
+]
+data = [
+    "pandas>=2.2,<3.0",
+    "pyarrow>=18,<23",
+    "pandera>=0.26,<1.0",
+]
 dev = [
     "pytest>=8.3,<9.0",
     "httpx>=0.28,<1.0",
     "ruff>=0.9,<1.0",
     "pre-commit>=4.0,<5.0",
+    "build>=1.2,<2.0",
 ]
 
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["app*", "ml*", "pipelines*"]
 
 
 [tool.ruff]

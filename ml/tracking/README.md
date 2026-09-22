@@ -7,7 +7,10 @@ Folder ini berisi integration boundary untuk MLflow pada Sprint 3.
 - `config.py` — typed loader untuk `configs/tracking.yaml`.
 - `client.py` — wrapper untuk tracking URI, experiment creation/reuse, dan run lifecycle.
 - `logging.py` — flattening dan logging training parameters ke active MLflow run.
-- `metadata.py` — dataset summary, config hash, git commit, dan training timestamp.
+- `metadata.py` — dataset summary, config hash, git commit, feature-contract version, dan training
+  timestamp.
+- `lineage.py` — stable dataset/schema/content/config/code fingerprints, split row counts, dan time
+  ranges.
 - `registry.py` — logging, registration reference, dan loading model artifact.
 
 ## Contract
@@ -28,10 +31,17 @@ python -m pipelines.train_models --config configs/model.yaml --tracking-config c
 ```
 
 Perintah tersebut membuat parent run, nested validation run untuk setiap model, lalu final
-candidate run yang menyimpan evaluation report dan mendaftarkan model pemenang. Alias
-`candidate` boleh bergerak otomatis ke version candidate terbaru; alias `staging` dan
+candidate run yang menyimpan evaluation report, calibration data, dataset manifest, model
+signature/input example, dan mendaftarkan model pemenang. Alias
+`candidate` hanya bergerak setelah signature dan feature-only input example tervalidasi terhadap
+model yang dimuat kembali. Artifact cloudpickle hanya boleh dimuat dari registry yang terpercaya dan
+access-controlled; jangan memuat artifact model dari sumber eksternal. Alias `staging` dan
 `production` selalu membutuhkan persetujuan eksplisit:
 
 ```pwsh
 python -m pipelines.promote_model --version 3 --stage staging --approved-by "reviewer" --reason "PR-AUC dan recall memenuhi quality gate."
 ```
+
+Model version yang dibuat sebelum signature/input validation berhasil harus diperlakukan sebagai
+non-promotable audit history. Version tersebut tidak dihapus otomatis; hanya candidate baru yang
+lolos semua validation gate yang boleh menerima alias `candidate`.

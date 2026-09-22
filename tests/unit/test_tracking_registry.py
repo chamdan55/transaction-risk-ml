@@ -9,8 +9,8 @@ class FakeSklearn:
     logged = None
 
     @classmethod
-    def log_model(cls, model, artifact_path, registered_model_name, serialization_format):
-        cls.logged = (model, artifact_path, registered_model_name, serialization_format)
+    def log_model(cls, model, name, registered_model_name, serialization_format):
+        cls.logged = (model, name, registered_model_name, serialization_format)
         return SimpleNamespace(
             model_uri="runs:/run-1/model",
             registered_model_version="1",

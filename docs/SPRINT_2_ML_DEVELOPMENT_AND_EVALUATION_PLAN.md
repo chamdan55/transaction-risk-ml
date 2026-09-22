@@ -7,9 +7,10 @@ Membangun, membandingkan, dan memilih model klasifikasi transaction fraud berdas
 Sprint 2 menggunakan output berikut dari Sprint 1:
 
 ```text
-data/processed/features/train
-data/processed/features/validation
-data/processed/features/test
+data/processed/features/audit       # full schema; profiling/audit only
+data/processed/features/train      # model-ready contract projection
+data/processed/features/validation # model-ready contract projection
+data/processed/features/test       # model-ready contract projection
 ```
 
 Sprint 2 tidak membaca atau memproses ulang raw dataset. Seluruh proses training harus menggunakan feature dataset yang telah divalidasi dan di-split secara kronologis oleh pipeline Sprint 1.
@@ -24,6 +25,7 @@ Sprint 2 tidak membaca atau memproses ulang raw dataset. Seluruh proses training
 - Training minimal tiga model.
 - Model evaluation pada validation dan test dataset.
 - Threshold analysis berbasis metrik dan kebutuhan bisnis.
+- Business-cost assumptions, minimum recall, calibration, alert volume, dan model card.
 - Pemilihan production candidate.
 - Penyimpanan model artifact dan evaluation report.
 - Reproducibility melalui konfigurasi dan random seed.
@@ -52,7 +54,9 @@ Karena transaction fraud umumnya merupakan kelas minoritas, accuracy tidak digun
 
 ## 4. Feature and Leakage Policy
 
-Training feature harus menggunakan `MODEL_FEATURE_COLUMNS` dari modul split Sprint 1. Kolom berikut tidak boleh digunakan sebagai model input:
+Training feature harus menggunakan versioned `MODEL_FEATURE_COLUMNS` dari
+`ml/contracts/features.py` (dengan compatibility re-export dari modul split Sprint 1). Contract
+saat ini adalah `pre-transaction-v1`. Kolom berikut tidak boleh digunakan sebagai model input:
 
 - `transaction_id`.
 - `timestamp`.
@@ -61,7 +65,11 @@ Training feature harus menggunakan `MODEL_FEATURE_COLUMNS` dari modul split Spri
 - `is_fraud` sebagai target.
 - `is_flagged_fraud` sebagai label atau proxy label.
 
-Fitur yang hanya tersedia setelah transaksi selesai harus ditinjau sebelum training. Secara khusus, `origin_balance_after` dan `destination_balance_after` harus diputuskan berdasarkan waktu prediksi model. Jika model dimaksudkan untuk memprediksi fraud sebelum transaksi diproses, fitur tersebut harus dikeluarkan atau dinyatakan sebagai fitur offline-only.
+Fitur yang hanya tersedia setelah transaksi selesai tidak boleh masuk model pre-transaction. Secara
+khusus, `origin_balance_after`, `destination_balance_after`, seluruh balance delta/ratio/mismatch
+yang bergantung pada after-balance, dan fitur historical yang belum memiliki online state source
+harus dikeluarkan dari model input. Post-event fields boleh tetap berada di canonical dataset untuk
+profiling atau use case post-transaction yang terpisah.
 
 Keputusan feature availability dan leakage harus dicatat dalam konfigurasi atau evaluation report.
 
@@ -232,6 +240,7 @@ Implementation:
 - Mendefinisikan rekomendasi threshold berdasarkan prioritas bisnis.
 - Mencatat cost assumption jika business cost tersedia.
 - Menyimpan threshold terpilih dalam evaluation report.
+- Menyimpan Brier score, calibration bins, alert rate, expected cost, dan cost assumptions.
 
 ### Step 9 — Select Production Candidate and Run Final Test
 
@@ -242,6 +251,7 @@ Implementation:
 - Memilih production candidate berdasarkan primary metric dan constraint minimum.
 - Menjalankan final evaluation pada test set satu kali.
 - Menyimpan nama model, parameter, threshold, dan final metrics.
+- Menggunakan full final-test period secara default; sampling final test harus eksplisit dan tercatat.
 - Memastikan test set tidak digunakan untuk tuning setelah final result dibuat.
 
 ### Step 10 — Add Training Pipeline and Reproducibility Checks
@@ -254,6 +264,7 @@ Implementation:
 - Menambahkan target Makefile jika diperlukan, misalnya `make train-models`.
 - Menyediakan input konfigurasi melalui file config.
 - Menyimpan output ke direktori artifact yang konsisten.
+- Menghasilkan dataset/schema/config/code lineage manifest dan model card.
 - Memastikan run kedua dengan input dan konfigurasi yang sama menghasilkan schema dan metrics yang konsisten.
 
 ### Step 11 — Add Tests and Quality Gates
@@ -305,10 +316,14 @@ Setelah Sprint 2 selesai, repository diharapkan memiliki:
 - [x] Precision, recall, F1, ROC-AUC, dan PR-AUC tersedia.
 - [x] Confusion matrix tersedia.
 - [x] Threshold analysis tersedia.
-- [x] Production candidate ditentukan berdasarkan validation result.
+- [ ] Production candidate ditentukan berdasarkan validation result; runtime validation menemukan
+  fail-fast pada model pertama yang tidak lolos gate dan perbaikannya ditetapkan pada TRM-014.
 - [x] Final evaluation dilakukan pada test set.
 - [x] Model artifact dapat dimuat kembali.
 - [x] Evaluation report dapat dibaca kembali.
+- [x] Brier score, calibration data, alert rate, expected business cost, dan model card tersedia di
+  code path TRM-006.
+- [x] Dataset, schema, config, code, dan time-range lineage dicatat secara versionable.
 - [x] Training dapat direproduksi dari konfigurasi.
 - [x] Unit test tersedia dan passed.
 - [x] Integration test tersedia dan passed.

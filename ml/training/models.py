@@ -61,6 +61,7 @@ def train_random_forest(
         config.model_params["random_forest"],
         target_distribution=target_distribution,
         random_seed=config.random_seed,
+        imbalance_strategy=config.imbalance_strategy,
     )
     estimator = RandomForestClassifier(**model_params)
     estimator.fit(transformed_features, target)
@@ -93,7 +94,11 @@ def train_xgboost(
     preprocessor = FeaturePreprocessor(feature_columns, config.target_column)
     transformed_features = preprocessor.fit_transform(train_frame)
     model_params = dict(config.model_params["xgboost"])
-    model_params.setdefault("scale_pos_weight", scale_pos_weight(target_distribution))
+    if config.imbalance_strategy == "class_weight":
+        model_params.setdefault("scale_pos_weight", scale_pos_weight(target_distribution))
+    elif config.imbalance_strategy == "negative_sampling":
+        # Negative sampling is the sole imbalance strategy for this configuration.
+        model_params.pop("scale_pos_weight", None)
     model_params.setdefault("random_state", config.random_seed)
     model_params.setdefault("n_jobs", -1)
     estimator = XGBClassifier(**model_params)
@@ -112,8 +117,14 @@ def _prepare_params(
     *,
     target_distribution: TargetDistribution,
     random_seed: int,
+    imbalance_strategy: str,
 ) -> dict[str, Any]:
     prepared_params = dict(params)
+    if imbalance_strategy == "class_weight":
+        prepared_params.setdefault("class_weight", "balanced")
+    elif imbalance_strategy == "negative_sampling":
+        # Avoid combining negative sampling with estimator-level balanced weights.
+        prepared_params.pop("class_weight", None)
     if prepared_params.get("class_weight") == "balanced":
         prepared_params["class_weight"] = balanced_class_weight(target_distribution)
     prepared_params.setdefault("random_state", random_seed)

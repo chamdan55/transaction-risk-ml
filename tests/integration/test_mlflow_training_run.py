@@ -1,4 +1,5 @@
 import importlib.util
+import json
 
 import pandas as pd
 import pytest
@@ -93,11 +94,19 @@ def test_project_model_bundle_is_logged_with_cloudpickle(tmp_path):
     client.configure()
 
     with client.start_run(run_name="bundle"):
+        input_example = frame.loc[:, ["amount_log", "transaction_type"]].head(2).copy()
+        input_example["amount_log"] = input_example["amount_log"].astype("float64")
+        signature = client.infer_signature(model, input_example)
+        assert "is_fraud" not in json.dumps(signature.to_dict())
         reference = log_and_register_model(
             client,
             model,
             model_name="logistic_regression",
+            signature=signature,
+            input_example=input_example,
         )
         loaded = load_logged_model(client, reference)
 
-    assert loaded.predict(frame).shape == (len(frame),)
+    serving_frame = frame.loc[:, ["amount_log", "transaction_type"]]
+    assert loaded.predict(serving_frame).shape == (len(frame),)
+    assert loaded.predict_proba(serving_frame).shape == (len(frame), 2)

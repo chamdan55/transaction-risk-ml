@@ -1,8 +1,8 @@
-.PHONY: install test lint-fix lint format format-check pre-commit pipeline train run
+.PHONY: install test lint-fix lint format format-check pre-commit pipeline train run up-mlflow
 
 install:
 	python -m pip install --upgrade pip
-	pip install -e ".[dev]"
+	pip install -e ".[training,tracking,dev]" -c requirements/constraints-py312.txt
 	pre-commit install
 
 test:
@@ -31,3 +31,6 @@ train:
 
 run:
 	uvicorn app.main:app --reload
+
+up-mlflow:
+	mlflow ui --backend-store-uri sqlite:///mlflow.db --default-artifact-root mlartifacts

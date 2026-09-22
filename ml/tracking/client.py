@@ -109,6 +109,8 @@ class MlflowTrackingClient:
         *,
         artifact_path: str,
         registered_model_name: str | None = None,
+        signature: Any | None = None,
+        input_example: Any | None = None,
     ) -> Any:
         """Log a complete preprocessing-plus-estimator model artifact."""
 
@@ -116,14 +118,30 @@ class MlflowTrackingClient:
             raise TrackingClientError("artifact_path must not be empty")
         mlflow = self._load_mlflow()
         try:
-            return mlflow.sklearn.log_model(
-                model,
-                name=artifact_path,
-                registered_model_name=registered_model_name,
-                serialization_format="cloudpickle",
-            )
+            kwargs = {
+                "name": artifact_path,
+                "registered_model_name": registered_model_name,
+                "serialization_format": "cloudpickle",
+            }
+            if signature is not None:
+                kwargs["signature"] = signature
+            if input_example is not None:
+                kwargs["input_example"] = input_example
+            return mlflow.sklearn.log_model(model, **kwargs)
         except Exception as exc:
             raise TrackingClientError("Unable to log MLflow model artifact") from exc
+
+    def infer_signature(self, model: Any, input_example: Any) -> Any:
+        """Infer an MLflow model signature from the serving input example."""
+
+        mlflow = self._load_mlflow()
+        try:
+            return mlflow.models.infer_signature(
+                input_example,
+                model.predict_proba(input_example),
+            )
+        except Exception as exc:
+            raise TrackingClientError(f"Unable to infer MLflow model signature: {exc}") from exc
 
     def load_model(self, model_uri: str) -> Any:
         """Load a model artifact previously logged with the sklearn flavor."""

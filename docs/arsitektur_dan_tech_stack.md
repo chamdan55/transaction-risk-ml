@@ -1,1029 +1,522 @@
-Nama kerja project:
+# Transaction Risk Scoring — Architecture and Technology Stack
 
-> Transaction Risk Scoring — End-to-End ML Platform
+## 1. Document Status
 
-Tujuan akhirnya:
+Dokumen ini adalah source of truth arsitektur untuk implementasi setelah technical review
+Sprint 0–3. Detail pekerjaan dieksekusi melalui backlog di `docs/tickets/` dan urutan sprint
+di `docs/sprint_docs.md`.
 
-> Build, deploy, monitor, and continuously improve a production-ready machine learning system for transaction risk scoring.
+Status arsitektur saat ini:
 
-Fokus utamanya adalah membuktikan end-to-end ML lifecycle tanpa cloud.
+- Sprint 0–1 menyediakan fondasi engineering dan batch data pipeline yang cukup baik untuk
+  project lokal/portfolio.
+- Sprint 2 sudah menghasilkan model dan evaluation flow, tetapi hasilnya harus direvalidasi
+  setelah prediction-time feature contract diperbaiki.
+- Sprint 3 memiliki experiment tracking dan registry flow, tetapi quality gate belum selesai.
+- Sprint 4 tidak boleh dimulai sebelum Sprint 3.5 selesai.
 
----
+Keputusan utama review:
 
-# 1. High-Level Architecture (init)
-Arsitektur final yang saya rekomendasikan:
+> Sistem ditujukan sebagai local-first, production-oriented MLOps portfolio. Sistem tidak boleh
+> mengklaim cloud-scale atau high availability hanya karena berjalan di local Kubernetes.
+
+## 2. Context, Goal, and Non-Goals
+
+### Goal
+
+Mendemonstrasikan lifecycle machine learning yang dapat ditelusuri dan diuji untuk transaction
+risk scoring:
+
+```text
+Raw data
+  -> validated and versioned features
+  -> temporal training and evaluation
+  -> experiment tracking and model registry
+  -> controlled model promotion
+  -> online inference
+  -> system and ML monitoring
+  -> controlled retraining
 ```
 
-                           ┌──────────────────────┐
-                           │       GitHub         │
-                           │  Source + CI/CD      │
-                           └──────────┬───────────┘
-                                      │
-                                      ▼
-                           ┌──────────────────────┐
-                           │   GitHub Actions     │
-                           │ Test / Lint / Build  │
-                           └──────────┬───────────┘
-                                      │
-                                      ▼
-                           ┌──────────────────────┐
-                           │    Docker Images     │
-                           └──────────┬───────────┘
-                                      │
-                                      ▼
-                    ┌─────────────────────────────────┐
-                    │       Local Kubernetes          │
-                    │       kind / Minikube           │
-                    │                                 │
-                    │   ┌─────────────────────────┐   │
-                    │   │    FastAPI Inference    │   │
-                    │   │                         │   │
-                    │   │  /predict               │   │
-                    │   │  /health                │   │
-                    │   │  /model/info            │   │
-                    │   └────────────┬────────────┘   │
-                    │                │                │
-                    │                ▼                │
-                    │   ┌─────────────────────────┐   │
-                    │   │     ML Model            │   │
-                    │   │     XGBoost             │   │
-                    │   └─────────────────────────┘   │
-                    │                │                │
-                    └────────────────┼────────────────┘
-                                     │
-                    ┌────────────────┴────────────────┐
-                    │                                 │
-                    ▼                                 ▼
-          ┌───────────────────┐             ┌───────────────────┐
-          │    Prometheus     │             │    Prediction     │
-          │ System Metrics    │             │       Logs        │
-          └─────────┬─────────┘             └─────────┬─────────┘
-                    │                                 │
-                    ▼                                 ▼
-          ┌───────────────────┐             ┌───────────────────┐
-          │      Grafana      │             │     Evidently     │
-          │    Dashboards     │             │ Drift / Quality   │
-          └───────────────────┘             └─────────┬─────────┘
-                                                      │
-                                                      ▼
-                                            ┌───────────────────┐
-                                            │ Retraining Trigger│
-                                            └─────────┬─────────┘
-                                                      │
-                                                      ▼
-                                            ┌───────────────────┐
-                                            │ Training Pipeline │
-                                            └─────────┬─────────┘
-                                                      │
-                                                      ▼
-                                            ┌───────────────────┐
-                                            │       MLflow      │
-                                            │ Experiment +      │
-                                            │ Model Registry    │
-                                            └───────────────────┘
-```
-Ada empat subsystem utama:
+### Primary prediction contract
 
-ML Pipeline
-Model Serving
-ML Monitoring
-MLOps Automation
+Model memberikan risk score **sebelum transaksi diselesaikan**. Oleh karena itu, setiap model
+feature wajib tersedia pada prediction time. Fitur yang baru muncul setelah transaksi diproses
+tidak boleh menjadi input model online.
 
----
+Jika kelak dibutuhkan post-transaction fraud detection, model tersebut harus menjadi use case,
+dataset, registry name, endpoint, dan SLO yang terpisah.
 
-# 2. Final Tech Stack
+### Intended users
 
-Saya sarankan kita tidak menambahkan teknologi hanya supaya terlihat banyak.
+- Developer atau reviewer yang menjalankan demo secara lokal.
+- ML engineer yang menjalankan batch training dan model promotion.
+- Client internal yang memanggil synchronous risk-scoring API.
+- Operator yang memeriksa health, metrics, alerts, dan model version.
 
-Final stack:
+### Non-goals
 
-| Layer	| Technology | Purpose |
-| :--- | :---: | ---: |
-| Language | Python 3.12 | Core language |
-| Data processing | Pandas | Data preparation |
-| ML | scikit-learn | Baseline + preprocessing |
-| ML | XGBoost | Main production model |
-| Data validation | Pandera | Dataset/schema validation |
-| Experiment tracking | MLflow | Experiments + metrics |
-| Model registry | MLflow | Model versioning |
-| API | FastAPI | Model serving |
-| API schema | Pydantic | Request/response validation |
-| Testing | Pytest | Unit/integration/model tests |
-| Code quality | Ruff | Linting + formatting |
-| Container | Docker | Packaging |
-| Orchestration | Kubernetes | Deployment |
-| Local Kubernetes | kind | Local cluster
-| System monitoring | Prometheus | Metrics |
-| Dashboard | Grafana | Visualization |
-| ML monitoring | Evidently | Drift/data/model monitoring |
-| CI/CD | GitHub Actions | Automation |
-| Version control | Git + GitHub | Source control |
-| Storage | PostgreSQL | Metadata / application data |
-| Artifact storage | Local filesystem / Docker volume | Model/artifacts |
-| --- | --- | --- |
+- Multi-region cloud deployment.
+- Exactly-once streaming platform.
+- Kafka, Airflow, Kubeflow, atau feature-store platform sebelum kebutuhan nyata muncul.
+- Automatic promotion langsung ke production hanya berdasarkan drift atau satu metric.
+- Penyimpanan data transaksi nyata yang mengandung PII tanpa governance tambahan.
 
-**Yang sengaja tidak kita gunakan**
+## 3. Architecture Principles
 
-Untuk menjaga scope:
-- AWS
-- Azure
-- GCP
-- Kafka
-- Spark
-- Airflow
-- Kubeflow
-- Terraform
-- MLflow alternatives
-- LangChain
-- LLM
+1. **Prediction-time correctness before model accuracy.** Offline feature tidak boleh memakai
+   informasi yang tidak tersedia pada online request.
+2. **One feature contract.** Training dan serving memakai daftar, tipe, urutan, dan transformasi
+   feature yang sama.
+3. **Temporal evaluation.** Model selection memakai validation period; test period hanya dipakai
+   untuk final evaluation.
+4. **Immutable and traceable artifacts.** Dataset snapshot, config, code revision, metrics, model,
+   schema, dan threshold harus dapat ditelusuri.
+5. **Stateless serving.** API menyimpan model approved di memory, tidak melakukan training atau
+   memanggil registry pada setiap request.
+6. **Controlled promotion.** Candidate hanya menjadi production setelah quality gate dan explicit
+   approval.
+7. **Local-first with production profiles.** Komponen sederhana menjadi default; komponen HA atau
+   distributed hanya diaktifkan pada profile yang membutuhkannya.
+8. **Security and observability by design.** Authentication, redaction, metrics, readiness, dan
+   auditability bukan pekerjaan tambahan setelah deployment.
 
-__Bukan karena teknologi tersebut tidak bagus__, tetapi karena mereka tidak diperlukan untuk membuktikan objective project.
+## 4. Deployment Profiles
 
----
+| Concern | Local/MVP profile | Production-like profile |
+|---|---|---|
+| Data processing | Local PySpark | Spark runtime yang resource-nya configurable |
+| MLflow backend | SQLite | PostgreSQL |
+| Model artifacts | Local filesystem volume | S3-compatible object storage/MinIO |
+| Serving | One FastAPI process or Docker Compose | Multiple stateless replicas |
+| Orchestration | Docker Compose | kind Kubernetes for demonstration |
+| Monitoring | Structured logs + local metrics | Prometheus, Grafana, alert rules |
+| Drift jobs | Manual/scheduled batch | Kubernetes CronJob or scheduled CI job |
+| Availability claim | Developer convenience | Pod/process resilience only; kind single-node is not node HA |
 
-# 3. Kenapa XGBoost?
+Cloud services may replace PostgreSQL/object storage/Kubernetes later, but they are intentionally
+provider-neutral in this project.
 
-Saya pilih __XGBoost sebagai production model__, dengan scikit-learn sebagai baseline.
+## 5. Target Architecture
 
-Strukturnya:
-```
-Baseline
-   │
-   ├── Logistic Regression
-   │
-   └── Random Forest
-          │
-          ▼
-     XGBoost
-          │
-          ▼
-   Production Candidate
-```
-Ini memberikan cerita yang bagus:
-```
-Baseline → experimentation → model comparison → production candidate.
-```
-Dan XGBoost sangat masuk akal untuk dataset tabular seperti transaction risk.
+```mermaid
+flowchart LR
+    subgraph Offline[Offline ML Plane]
+        RAW[Immutable Raw Data]
+        DQ[Schema and Domain Validation]
+        SNAP[Versioned Feature Snapshot<br/>Pre-transaction Features Only]
+        TRAIN[Temporal Training<br/>LR / RF / XGBoost]
+        EVAL[Evaluation Gates<br/>PR-AUC / Recall / Cost / Calibration]
+        REG[MLflow Tracking and Registry]
+        RAW --> DQ --> SNAP --> TRAIN --> EVAL
+        EVAL -->|pass| REG
+        EVAL -->|reject| TRAIN
+    end
 
----
+    subgraph Online[Online Inference Plane]
+        CLIENT[Internal Client]
+        EDGE[TLS / Authentication / Rate Limit]
+        API[Stateless FastAPI Replicas]
+        CONTRACT[Shared Feature Contract]
+        MODEL[Approved Model in Memory]
+        CLIENT --> EDGE --> API --> CONTRACT --> MODEL --> API
+    end
 
-# 4. Data Layer
+    REG -->|load production alias at startup| MODEL
 
-Kita gunakan dataset publik atau synthetic transaction dataset.
+    subgraph State[Durable State]
+        META[PostgreSQL<br/>MLflow Metadata]
+        ART[Artifact Storage<br/>Volume or MinIO]
+        EVENTS[Prediction and Label Store]
+    end
 
-Saya lebih suka pendekatan:
+    REG --> META
+    REG --> ART
+    API -->|structured prediction event| EVENTS
 
-**Training data**
-```
-data/
-├── raw/
-├── processed/
-└── reference/
+    subgraph Observe[Observability Plane]
+        PROM[Prometheus]
+        GRAF[Grafana and Alerts]
+        DRIFT[Scheduled Evidently Job]
+        API --> PROM --> GRAF
+        EVENTS --> DRIFT --> GRAF
+    end
+
+    subgraph Improve[Controlled Improvement Loop]
+        LABELS[Delayed Ground-truth Labels]
+        TRIGGER[Drift or Performance Review]
+        APPROVAL[Human Approval]
+        LABELS --> EVENTS
+        DRIFT --> TRIGGER --> TRAIN
+        EVAL --> APPROVAL -->|promote alias| REG
+    end
 ```
 
-**Pipeline:**
-```
-                    ┌──────────────────┐
-                    │   Raw Transaction│
-                    │       Data       │
-                    └────────┬─────────┘
-                             │
-                             ▼
-                    ┌──────────────────┐
-                    │     PySpark      │
-                    │                  │
-                    │ Validation       │
-                    │ Cleaning         │
-                    │ Transformation   │
-                    │ Aggregation      │
-                    │ Feature Eng.     │
-                    └────────┬─────────┘
-                             │
-                             ▼
-                       Parquet Dataset
-                             │
-                             ▼
-                    Train / Validation
-                           / Test
-                             │
-                             ▼
-                  ┌─────────────────────┐
-                  │ scikit-learn /      │
-                  │ XGBoost             │
-                  └──────────┬──────────┘
-                             │
-                             ▼
-                          MLflow
+## 6. Data and Feature Architecture
+
+### Layering
+
+```text
+data/raw/                       immutable local source, ignored by Git
+data/processed/canonical/       canonical transaction snapshot
+data/processed/features/audit/  full feature schema for profiling/audit only
+data/processed/features/        model-ready split root
+  train/                        contract projection + target/integrity key
+  validation/                   contract projection + target/integrity key
+  test/                         contract projection + target/integrity key
+artifacts/manifests/            dataset/schema/config fingerprints
 ```
 
-Contoh feature
-```
-transaction_amount
-transaction_hour
-transaction_day
-merchant_category
-transaction_frequency
-location_distance
-account_age
-previous_transaction_amount
-device_change
-international_transaction
-```
+Every generated snapshot must have a manifest containing at least:
 
-__Target:__
+- Dataset name and source.
+- Row count and positive/negative target counts.
+- Minimum and maximum event timestamp.
+- Schema fingerprint.
+- Source/input fingerprint.
+- Feature-contract version.
+- Pipeline code commit.
+- Config hash and creation timestamp.
 
-```is_risky```
+### Allowed pre-transaction feature groups
 
----
+- Transaction type and amount.
+- Timestamp-derived values such as hour and day-of-week.
+- Origin and destination balances available before authorization.
+- Ratios derived only from pre-transaction values.
+- Historical velocity/aggregation features computed strictly before current event time.
 
-# 5. Data Validation
+### Forbidden online model features
 
-Kita akan menggunakan __Pandera__.
+- `origin_balance_after`.
+- `destination_balance_after`.
+- `origin_balance_delta` and `destination_balance_delta` when based on after-balance.
+- `origin_balance_mismatch` and `destination_balance_mismatch` when after-balance is required.
+- `origin_balance_depleted`.
+- `destination_balance_increased`.
+- Target, proxy label, identifiers, atau future transaction values.
 
-Misalnya:
-```
-transaction_amount
-→ numeric
-→ >= 0
+Post-transaction fields may remain in canonical data for profiling, audit, atau a separate post-event
+model. They must not enter the pre-transaction model feature list.
 
-transaction_hour
-→ integer
-→ 0–23
+### Historical features and online parity
 
-merchant_category
-→ string
-→ not null
+For the first serving MVP, only request-available features are required. Historical behavioral
+features may be enabled only when their online source and freshness contract exist. Until then,
+they must not silently be filled with arbitrary defaults.
 
-is_risky
-→ 0 / 1
-```
+An advanced profile may use Redis or another state store for recent account aggregates. Adding a
+feature-store product is not required for this project.
 
-Ini penting karena requirement vacancy menyebut:
+## 7. Batch Pipeline Performance Rules
 
-```data governance, security, and best engineering practices```
+- Avoid repeated `count()` or independent scans when one aggregation can produce the same result.
+- Persist only DataFrames reused by multiple actions, and always unpersist them.
+- Avoid unpartitioned global windows for split and sampling on large data. Exact row caps remain
+  available only where exact counts are part of the reproducibility contract; the default large-data
+  split uses distributed timestamp boundaries.
+- Make Spark master, driver memory, shuffle partitions, and output partitions configurable.
+- Prefer deterministic hash sampling that does not force a global `row_number` operation.
+- Do not cap final test evaluation by default. If sampling is required, use a separately named,
+  stratified evaluation sample and report confidence/coverage.
+- Write canonical, feature, and split datasets into unambiguous directories; do not mix root
+  Parquet files and child datasets as one logical table.
 
-Data validation adalah salah satu bentuk engineering discipline yang konkret.
+PySpark remains in the stack because the project demonstrates distributed data engineering on the
+6.36M-row PaySim dataset. It is not evidence of horizontal scalability until the pipeline is tested
+on a multi-worker runtime.
 
----
+## 8. Model Development and Evaluation
 
-# 6. ML Training Architecture
+### Models
 
-**Training pipeline:**
-```
-                 ┌─────────────┐
-                 │ Raw Dataset │
-                 └──────┬──────┘
-                        ▼
-                ┌───────────────┐
-                │ Data Validate │
-                └──────┬────────┘
-                       ▼
-                ┌───────────────┐
-                │ Preprocessing │
-                └──────┬────────┘
-                       ▼
-                ┌───────────────┐
-                │Feature Engineer│
-                └──────┬────────┘
-                       ▼
-              ┌──────────────────┐
-              │ Train / Val / Test│
-              └─────────┬────────┘
-                        │
-           ┌────────────┼────────────┐
-           ▼            ▼            ▼
-       Logistic      Random       XGBoost
-      Regression     Forest
-           │            │            │
-           └────────────┼────────────┘
-                        ▼
-                 Model Evaluation
-                        │
-                        ▼
-                  MLflow Tracking
-                        │
-                        ▼
-                  Model Selection
-                        │
-                        ▼
-                 Model Registry
-```
+- Logistic Regression as explainable baseline.
+- Random Forest as non-linear comparison.
+- XGBoost as a candidate, not an assumed winner.
 
----
+### Training rules
 
-# 7. MLflow Architecture
+- Preprocessing is fit only on training data.
+- Class weighting and sampling effects must be evaluated together; do not apply both blindly.
+- Validation and test distributions must remain representative of their chronological periods.
+- Hyperparameters and random seeds live in typed configuration.
+- XGBoost training should use an evaluation set and early stopping when beneficial.
+- Probability calibration is required before interpreting the output as a risk probability.
 
-MLflow menjadi pusat experiment tracking.
+### Evaluation gates
 
-Misalnya:
-```
-Experiment:
-transaction-risk-classification
+Minimum metrics:
 
-Run 001
-├── algorithm = logistic_regression
-├── learning_rate = -
-├── max_depth = -
-├── F1 = 0.72
-└── ROC-AUC = 0.81
+- PR-AUC and ROC-AUC.
+- Precision, recall, and F1 at the selected threshold.
+- Confusion matrix.
+- Brier score and calibration curve.
+- Prediction volume and alert rate.
+- Expected business cost using configured false-positive and false-negative assumptions.
+- Results for each temporal validation/backtest window when available.
 
-Run 002
-├── algorithm = random_forest
-├── n_estimators = 300
-├── F1 = 0.81
-└── ROC-AUC = 0.89
+The threshold selection configuration must include business cost assumptions and an optional
+minimum recall constraint. `false_positive_cost=1` and `false_negative_cost=1` are acceptable only
+as an explicitly documented neutral test scenario.
 
-Run 003
-├── algorithm = xgboost
-├── max_depth = 6
-├── learning_rate = 0.05
-├── F1 = 0.88
-└── ROC-AUC = 0.94
-```
-Kemudian:
-```
-MLflow Model Registry
+## 9. MLflow Tracking and Registry
 
-transaction-risk-model
+### Current/local profile
 
-v1 → Production
-v2 → Staging
-v3 → Candidate
-```
-Ini akan menjadi salah satu bukti utama bahwa kamu memahami __model lifecycle.__
-
----
-
-# 8. Model Serving
-
-Model production disajikan melalui FastAPI.
+```yaml
+tracking:
+  uri: sqlite:///mlflow.db
+  experiment_name: transaction-risk-classification
+  registered_model_name: transaction-risk-model
+  artifact_location: mlartifacts
 ```
 
-                    Client
-                      │
-                      │ POST /predict
-                      ▼
-              ┌───────────────┐
-              │    FastAPI    │
-              └───────┬───────┘
-                      │
-                      ▼
-              Pydantic Validation
-                      │
-                      ▼
-               Feature Pipeline
-                      │
-                      ▼
-                ML Predictor
-                      │
-                      ▼
-                 XGBoost
-                      │
-                      ▼
-                  Prediction
-```
-Response:
-```
-{
-  "prediction": 1,
-  "risk_score": 0.91,
-  "risk_level": "HIGH",
-  "model_name": "transaction-risk-model",
-  "model_version": "3"
-}
-```
+SQLite and local artifacts are acceptable for one local writer. They are not the production-like
+HA design.
 
----
+### Compatibility contract
 
-# 9. API Design
+- The codebase intentionally uses the MLflow 3.x `name` argument when logging a model.
+- Internal domain objects may continue to call that value `artifact_path`; external API naming and
+  internal field naming must not be conflated.
+- `pyproject.toml`, tests, and implementation must declare and verify the same supported MLflow
+  version range.
 
-Minimal endpoint:
+### Required run/model metadata
 
-```
-POST /predict
+- Git commit and dirty/clean state.
+- Dataset and feature snapshot fingerprints.
+- Config hash.
+- Feature-contract and schema version.
+- Model parameters and imbalance strategy.
+- Validation, threshold, calibration, and final test metrics.
+- Model signature and safe input example.
+- Reviewer, rationale, and time for staging/production promotion.
+
+Model loading is allowed only from the trusted registry/artifact location. Because pickle-based
+formats can execute code during deserialization, artifact access and integrity must be controlled.
+
+## 10. Online Model Serving
+
+### Endpoints
+
+```text
+POST /v1/predictions
+GET  /health/live
+GET  /health/ready
+GET  /model/info
+GET  /metrics
 ```
 
-Operational endpoints:
-```
-GET /health
-GET /ready
-GET /model/info
-GET /metrics
-```
-Contoh:
-```
-GET /model/info
+### Serving behavior
 
-{
-  "model_name": "transaction-risk-model",
-  "version": "3",
-  "algorithm": "xgboost",
-  "trained_at": "2026-09-08",
-  "status": "production"
-}
-```
-Ini membuat model serving terasa seperti **production backend service.**
+- Load the model referenced by the configured registry alias during application startup.
+- Keep the validated model and threshold in memory.
+- Fail readiness if model, schema, threshold, or required dependency cannot be loaded.
+- Do not query MLflow on every prediction.
+- Reject unknown fields, missing features, invalid ranges, and oversized requests.
+- Return risk score, decision, model name/version, feature-contract version, and request ID.
+- Support graceful shutdown and bounded request timeouts.
+- Emit a prediction event without blocking the synchronous response path.
 
-Dan ini sangat sesuai dengan pengalamanmu di FastAPI.
+`/health/live` only indicates that the process is responsive. `/health/ready` indicates that the
+service can perform a valid prediction. Configuration or secrets must not be exposed through a
+public `/config` endpoint.
 
----
+## 11. Security and Compliance Baseline
 
-# 10. Kubernetes Architecture
+- TLS terminates at the ingress/reverse proxy for non-local traffic.
+- Internal clients authenticate with a documented mechanism; authorization is least-privilege.
+- Apply rate limits and request-size limits.
+- Secrets come from environment/secret mounts, never Git or ConfigMap.
+- Images run as non-root with read-only root filesystem where possible.
+- Pin and scan dependencies and base images; generate an SBOM.
+- Redact or hash account identifiers in logs and metrics.
+- Define prediction/label retention and deletion policies.
+- MLflow UI, registry, database, and artifact storage are not public endpoints.
+- Promotion and model changes produce an audit trail.
 
-Di Kubernetes kita tidak perlu membuat cluster yang kompleks.
-```
-Kubernetes Cluster
-│
-├── namespace: ml-platform
-│
-├── inference-api
-│   ├── Deployment
-│   ├── Service
-│   └── ConfigMap
-│
-├── monitoring
-│   ├── Prometheus
-│   └── Grafana
-│
-└── mlflow
-    ├── Deployment
-    └── Service
-```
-Untuk local development:
+## 12. Reliability and Scalability
 
-> kind
+### Inference
 
-Jadi:
-```
-Docker image
-       ↓
-kind cluster
-       ↓
-Kubernetes Deployment
-       ↓
-FastAPI Pod
-```
-Ini cukup untuk membuktikan orchestration skill.
+- Stateless replicas support horizontal scaling.
+- Resource requests/limits are based on load-test evidence.
+- Startup/readiness/liveness probes have distinct semantics.
+- Rolling deployment must preserve at least one ready replica.
+- Rollback uses the previous image and model alias/version.
+- HPA is enabled only after a useful CPU/RPS/latency signal is measured.
 
----
+### State
 
-# 11. Monitoring Architecture
+- Local profile uses recoverable volumes and documented reset procedures.
+- Production-like profile backs up PostgreSQL and artifact storage.
+- Registry aliases are pointers to immutable model versions.
+- Prediction events are append-only and tolerate temporary monitoring-job failures.
 
-Kita sengaja pisahkan:
+### Availability boundary
 
-### System monitoring
-```
-FastAPI
-   │
-   ▼
-Prometheus
-   │
-   ▼
-Grafana
-```
+Multiple pods on a single-node kind cluster protect only from process/pod failure. They do not
+protect from host, node, disk, or local network failure. This limitation must remain visible in the
+README and demo.
 
-Metrics:
-```
-request_count
-request_latency
-error_count
-prediction_count
-HTTP status
-```
+## 13. Observability
 
-Dashboard:
-```
-┌────────────────────────────────────┐
-│ Transaction Risk API               │
-├────────────────────────────────────┤
-│ Requests              128,421      │
-│ Error Rate              0.21%      │
-│ P95 Latency             74 ms      │
-│ Requests/min             183       │
-├────────────────────────────────────┤
-│ Prediction Distribution            │
-│ LOW        ███████████  71%        │
-│ MEDIUM     ████          19%       │
-│ HIGH       ██            10%       │
-└────────────────────────────────────┘
+### System metrics
+
+- Request count and rate.
+- Error and rejection rate.
+- p50/p95/p99 latency.
+- In-flight requests.
+- Model load/reload failures.
+- Prediction count by non-sensitive decision class.
+- CPU, memory, restart count, and readiness state.
+
+### ML monitoring
+
+- Missing, invalid, and out-of-range feature rates.
+- Feature distribution and drift.
+- Prediction distribution and drift.
+- Delayed precision, recall, PR-AUC, and calibration after labels arrive.
+- Model version and feature-contract version segmentation.
+
+Evidently jobs run asynchronously on a schedule. Prometheus metrics must avoid transaction IDs,
+account IDs, or any unbounded-cardinality labels.
+
+## 14. Retraining and Promotion
+
+```text
+Drift/performance signal
+  -> review and versioned dataset snapshot
+  -> retraining
+  -> temporal evaluation and leakage gates
+  -> candidate alias
+  -> optional shadow/canary evaluation
+  -> explicit approval
+  -> production alias
+  -> controlled rollout
+  -> rollback on SLO or quality regression
 ```
 
----
+Drift alone is not proof that a new model is better. Retraining may be automated; production
+promotion remains controlled unless a future governance decision explicitly changes that policy.
 
-# 12. ML Monitoring
+## 15. Technology Decisions
 
-System monitoring ≠ ML monitoring.
+| Layer | Technology | Decision |
+|---|---|---|
+| Language | Python 3.12 | Keep |
+| Batch data | PySpark | Keep for learning/data-pipeline scope; tune and profile |
+| Tabular ML | scikit-learn, XGBoost | Keep |
+| Data contracts | Explicit Spark schemas and validation | Keep; Pandera is optional, not required if unused |
+| Tracking/registry | MLflow 3.x-compatible API | Keep and pin supported range |
+| API | FastAPI + Pydantic | Keep |
+| Local orchestration | Docker Compose | Make primary runtime |
+| Kubernetes demo | kind | Keep as optional production-like profile |
+| Metrics/dashboard | Prometheus + Grafana | Add in observability sprint |
+| ML monitoring | Evidently batch jobs | Add after prediction logging exists |
+| Metadata database | SQLite local, PostgreSQL production-like | Profile-dependent |
+| Artifact storage | Filesystem local, MinIO production-like | Profile-dependent |
+| CI | GitHub Actions | Expand quality gates |
+| Scheduling | GitHub Actions schedule or Kubernetes CronJob | Prefer over Airflow for current scope |
 
-Kita buat pipeline terpisah:
-```
-Prediction Logs
-      │
-      ▼
-Evidently
-      │
-      ├── Data Drift
-      ├── Prediction Drift
-      ├── Data Quality
-      └── Model Performance
-```
-Contohnya:
-```
-Feature                  Drift
-────────────────────────────────
-transaction_amount       42%
-transaction_hour          3%
-merchant_category        18%
-location_distance        27%
+### Intentionally deferred
 
-Overall Drift: DETECTED
-```
+- Kafka.
+- Airflow.
+- Kubeflow.
+- Cloud-specific managed services.
+- Terraform until a real remote environment exists.
+- Distributed tracing until there is more than one meaningful online service hop.
 
----
+## 16. Dependency and Packaging Strategy
 
-# 13. Retraining Architecture
+Use separately installable dependency groups, for example:
 
-Ini bagian yang akan membuat project jauh lebih kuat.
-```
-               Production Data
-                      │
-                      ▼
-               Monitoring Job
-                      │
-              ┌───────┴───────┐
-              │               │
-         Data Drift      Performance
-              │               │
-              └───────┬───────┘
-                      ▼
-                Threshold?
-                 /       \
-               NO         YES
-               │           │
-               ▼           ▼
-             Stop      Retraining
-                           │
-                           ▼
-                     New Model
-                           │
-                           ▼
-                       Evaluate
-                           │
-                  ┌────────┴────────┐
-                  │                 │
-              Better?            Worse?
-                  │                 │
-                  ▼                 ▼
-             Candidate            Reject
-                  │
-                  ▼
-             Model Registry
-                  │
-                  ▼
-              Production
+```text
+core        shared schemas/contracts
+training    PySpark, pandas, sklearn, XGBoost
+tracking    MLflow and database driver
+serving     FastAPI, Uvicorn, model runtime
+monitoring  Evidently and reporting dependencies
+dev         pytest, Ruff, pre-commit, load-test tooling
 ```
 
-Dengan demikian kita punya:
+Package discovery must include `app`, `ml`, and executable pipeline modules, or adopt a `src/`
+layout. CI must build a wheel, install it into a clean environment, and run an import/smoke test so
+editable installs do not hide packaging defects.
 
-> training → deployment → monitoring → retraining → redeployment
+Use a committed lock/constraints strategy for repeatable CI and runtime builds.
 
-Ini benar-benar mencakup lifecycle yang diminta vacancy.
+## 17. Target Repository Structure
 
----
-
-# 14. CI/CD Architecture
-
-GitHub Actions:
-```
-Developer
-    │
-    ▼
-git push
-    │
-    ▼
-GitHub
-    │
-    ▼
-GitHub Actions
-    │
-    ├── Ruff
-    ├── Pytest
-    ├── Model tests
-    ├── Integration tests
-    │
-    ▼
-Docker Build
-    │
-    ▼
-Container Test
-    │
-    ▼
-Kubernetes Deployment
-```
-Untuk tahap awal kita bisa melakukan deployment ke local kind cluster dari CI secara terbatas atau menggunakan CI untuk build/test saja dan deployment secara lokal.
-
-Saya lebih menyarankan __CI terlebih dahulu, CD kemudian,__ supaya tidak over-engineer.
-
----
-
-# 15. Testing Strategy
-
-Ini juga jangan dilewatkan.
-
-### Unit test
-```
-test_feature_engineering()
-test_data_validation()
-test_prediction()
-```
-### Integration test
-```
-API
- ↓
-Preprocessing
- ↓
-Model
- ↓
-Response
-```
-
-### Model test
-Contohnya:
-```
-model F1 >= baseline
-recall >= minimum threshold
-prediction schema valid
-```
-### API test
-```
-POST /predict
-→ 200
-
-Invalid request
-→ 422
-
-Model unavailable
-→ 503
-```
-Jadi ML project-nya punya __software engineering discipline.__
-
----
-
-# 16. Repository Architecture Final
-
-Saya akan sedikit memperbaiki struktur repository sebelumnya supaya separation of concerns lebih jelas:
-```
+```text
 transaction-risk-ml/
-│
 ├── app/
-│   ├── api/
-│   │   ├── routes/
-│   │   │   ├── health.py
-│   │   │   ├── prediction.py
-│   │   │   └── model.py
-│   │   └── schemas.py
-│   │
+│   ├── api/routes/
 │   ├── core/
-│   │   ├── config.py
-│   │   └── logging.py
-│   │
 │   ├── inference/
-│   │   ├── predictor.py
-│   │   └── model_loader.py
-│   │
 │   └── main.py
-│
 ├── ml/
+│   ├── contracts/
 │   ├── data/
-│   │   ├── ingestion.py
-│   │   ├── validation.py
-│   │   └── preprocessing.py
-│   │
 │   ├── features/
-│   │   └── engineering.py
-│   │
 │   ├── training/
-│   │   ├── train.py
-│   │   ├── evaluate.py
-│   │   └── experiment.py
-│   │
+│   ├── evaluation/
+│   ├── tracking/
 │   └── monitoring/
-│       ├── drift.py
-│       └── performance.py
-│
 ├── pipelines/
-│   ├── training_pipeline.py
-│   ├── monitoring_pipeline.py
-│   └── retraining_pipeline.py
-│
+├── configs/
+├── deployment/
+│   ├── docker/
+│   ├── compose/
+│   └── kubernetes/
+├── monitoring/
+│   ├── prometheus/
+│   ├── grafana/
+│   └── evidently/
 ├── tests/
 │   ├── unit/
 │   ├── integration/
-│   └── model/
-│
-├── deployment/
-│   ├── docker/
-│   │   └── Dockerfile
-│   │
-│   └── kubernetes/
-│       ├── namespace.yaml
-│       ├── api-deployment.yaml
-│       ├── api-service.yaml
-│       ├── mlflow.yaml
-│       └── monitoring/
-│
-├── monitoring/
-│   ├── prometheus/
-│   └── grafana/
-│
-├── data/
-│   ├── raw/
-│   ├── processed/
-│   └── sample/
-│
-├── notebooks/
-│   ├── 01_data_exploration.ipynb
-│   └── 02_model_experiment.ipynb
-│
-├── .github/
-│   └── workflows/
-│       ├── ci.yml
-│       └── cd.yml
-│
-├── configs/
-│   ├── model.yaml
-│   └── monitoring.yaml
-│
+│   ├── contract/
+│   ├── model/
+│   └── load/
+├── docs/
+│   └── tickets/
 ├── pyproject.toml
-├── docker-compose.yml
-├── Makefile
 └── README.md
 ```
-Notebook __hanya untuk exploration/visualization.__
 
-Production logic tidak boleh berada di notebook.
+Notebook tetap hanya untuk exploration dan visualization. Production logic harus berada di module
+yang dapat diuji.
 
-Ini poin kecil tetapi penting untuk menunjukkan engineering maturity.
+## 18. Quality Gates
 
----
+Setiap perubahan harus lulus gate yang relevan:
 
-# 17. Development Environment
-
-Untuk development sehari-hari:
-```
-Windows
-   │
-   ├── Python
-   ├── Git
-   ├── Docker/Podman
-   │
-   └── kind
-          │
-          ▼
-    Kubernetes cluster
-```
-Local services:
-```
-localhost
-│
-├── FastAPI
-├── MLflow
-├── Prometheus
-└── Grafana
-```
-Semuanya dapat dijalankan dengan:
-```
-    make up
-```
-dan dihentikan dengan:
-```
-    make down
-```
-Jadi project mudah direproduksi oleh recruiter/engineer lain.
-
----
-
-# 18. Architecture Principles
-
-Saya ingin kita menetapkan beberapa prinsip dari awal.
-
-### 1. Reproducibility
-```
-Training yang sama → environment + data + config yang sama → hasil yang dapat direproduksi.
-```
-### 2. Separation of concerns
-```
-Data
-≠
-Training
-≠
-Inference
-≠
-Monitoring
-```
-### 3. Configuration-driven
-
-Hyperparameter tidak hard-coded di banyak tempat.
-
-Misalnya:
-```
-configs/model.yaml
-```
-### 4. Testability
-
-Semua komponen penting harus bisa dites tanpa menjalankan keseluruhan platform.
-
-### 5. Observability
-
-Production model tidak boleh dianggap selesai hanya karena endpoint ```/predict``` berhasil.
-
-### 6. Model promotion harus berdasarkan metric
-
-Bukan:
-```
-model baru → otomatis production.
-```
-Tetapi:
-```
-Candidate
-    ↓
-Evaluation
-    ↓
-Quality Gate
-    ↓
-Promotion
+```text
+ruff check
+ruff format --check
+unit tests
+integration tests
+wheel build and clean-install smoke test
+data/feature contract tests
+model leakage tests
+MLflow registry integration test
+container smoke and vulnerability scan
+API contract and load tests
 ```
 
-# 19. Mapping ke Requirement Vacancy
+Test yang tidak dapat berjalan karena environment harus dilaporkan sebagai **not executed**, bukan
+passed. CI status hanya boleh disebut green jika run remote pada commit yang sama sudah berhasil.
 
-Kalau kita selesai sampai architecture ini, mapping-nya sangat kuat:
-```
-"Design, develop, deploy ML models"
-             ↓
-        XGBoost + FastAPI
+## 19. Implementation Order
 
-"Scalable ML pipelines"
-             ↓
-    Training / Monitoring /
-       Retraining pipelines
+1. Sprint 3.5: feature correctness, MLflow repair, packaging, reproducibility, dan evaluation.
+2. Sprint 4: inference API and serving contract.
+3. Sprint 5: containerization, Compose, load testing, lalu optional kind deployment.
+4. Sprint 6: system observability, prediction logging, label feedback, dan drift monitoring.
+5. Sprint 7: controlled retraining, promotion, rollout, dan rollback.
+6. Final release validation: one-command demo and documented failure/recovery scenarios.
 
-"End-to-end ML lifecycle"
-             ↓
-Data → Train → Evaluate → Deploy
-→ Monitor → Retrain → Deploy
-
-"Model versioning"
-             ↓
-          MLflow
-
-"Experiment tracking"
-             ↓
-          MLflow
-
-"CI/CD"
-             ↓
-     GitHub Actions
-
-"Production monitoring"
-             ↓
- Prometheus + Grafana
-
-"Model monitoring"
-             ↓
-        Evidently
-
-"Model drift"
-             ↓
-        Evidently
-
-"Automated retraining"
-             ↓
-    Retraining Pipeline
-
-"APIs"
-             ↓
-         FastAPI
-
-"Containers"
-             ↓
-          Docker
-
-"Orchestration"
-             ↓
-        Kubernetes
-
-"Software engineering"
-             ↓
-Pytest + Ruff + Git + CI/CD
-```
-Dan yang paling penting:
-
-### Requirement yang menjadi hero feature project ini:
-```
-Understanding of the end-to-end machine learning lifecycle, including data preparation, model development, evaluation, deployment, and monitoring
-```
-Kita bahkan akan membuat lifecycle itu terlihat jelas di README:
-```
-             END-TO-END ML LIFECYCLE
-
-       ┌──────────────────────┐
-       │ 1. Data Preparation  │
-       └──────────┬───────────┘
-                  ↓
-       ┌──────────────────────┐
-       │ 2. Model Development │
-       └──────────┬───────────┘
-                  ↓
-       ┌──────────────────────┐
-       │ 3. Model Evaluation  │
-       └──────────┬───────────┘
-                  ↓
-       ┌──────────────────────┐
-       │ 4. Model Deployment  │
-       └──────────┬───────────┘
-                  ↓
-       ┌──────────────────────┐
-       │ 5. Model Monitoring  │
-       └──────────┬───────────┘
-                  ↓
-       ┌──────────────────────┐
-       │ 6. Retraining        │
-       └──────────┬───────────┘
-                  │
-                  └──────→ back to 2
-```
-
----
-
-# 20. Scope final yang saya sarankan
-
-Saya akan menetapkan **MVP → Production-like → Advanced supaya kita tidak terjebak over-engineering.**
-
-### MVP
-- Dataset
-- Data validation
-- Feature engineering
-- Baseline models
-- XGBoost
-- Evaluation
-- Lflow
-- FastAPI
-- Docker
-
-### Production-like
-- Kubernetes
-- Pytest
-- CI
-- Prometheus
-- Grafana
-- Evidently
-- Model registry
-- Model versioning
-
-### Advanced
-- Automated drift detection
-- Automated retraining
-- Model quality gate
-- Automated model promotion
-- CD
-- Load testing
-- Failure/recovery testing
-
----
-
-# 21. Project Success Criteria
-
-Project dianggap berhasil kalau kita bisa mendemonstrasikan:
-```
-Raw Data
-   ↓
-PySpark Data Pipeline
-   ↓
-Feature Dataset
-   ↓
-ML Training
-   ↓
-Model Evaluation
-   ↓
-MLflow
-   ↓
-Model Registry
-   ↓
-FastAPI
-   ↓
-Docker
-   ↓
-Kubernetes
-   ↓
-Prometheus/Grafana
-   ↓
-Evidently
-   ↓
-Drift Detection
-   ↓
-Retraining
-   ↓
-Model Promotion
-```
-Ini menjadi Definition of Done tingkat project.
-
----
+Detailed execution tickets and AI-agent prompts are maintained in `docs/tickets/README.md`.

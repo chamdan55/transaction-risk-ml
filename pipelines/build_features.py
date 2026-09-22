@@ -3,7 +3,7 @@ import logging
 import yaml
 
 from app.core.logging import setup_logging
-from ml.data.spark import create_spark_session
+from ml.data.spark import create_spark_session, resolve_spark_config
 from ml.data.validation import validate_canonical_data
 from ml.features.pipeline import build_features
 from ml.features.schema import validate_feature_schema, validate_feature_values
@@ -19,12 +19,13 @@ def load_config(path: str) -> dict:
 def main() -> None:
     setup_logging()
     config = load_config("configs/data.yaml")
-    spark = create_spark_session()
+    spark_config = resolve_spark_config(config.get("spark"))
+    spark = create_spark_session(spark_config)
 
     try:
         processed_path = config["data"]["processed_path"]
         input_path = f"{processed_path}/canonical"
-        output_path = f"{processed_path}/features"
+        output_path = f"{processed_path}/features/audit"
 
         logger.info("Reading canonical dataset: %s", input_path)
         canonical_df = spark.read.parquet(input_path)
@@ -39,7 +40,8 @@ def main() -> None:
         validate_feature_values(feature_df)
 
         logger.info("Writing feature dataset: %s", output_path)
-        feature_df.coalesce(4).write.mode("overwrite").parquet(output_path)
+        output_partitions = spark_config["output_partitions"]
+        feature_df.coalesce(output_partitions).write.mode("overwrite").parquet(output_path)
         logger.info("Feature dataset written successfully")
     finally:
         spark.stop()

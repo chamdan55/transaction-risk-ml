@@ -15,6 +15,23 @@ artifacts/evaluation_report.json
 configs/model.yaml
 ```
 
+### Status saat ini
+
+Capability tracking dan registry sudah tersedia di codebase, tetapi Sprint 3 **belum boleh
+ditandai selesai**. Status yang benar adalah **implemented, quality-gate pending**:
+
+- TRM-003 memperbaiki migrasi MLflow 3.x dan sudah diverifikasi melalui unit test serta SQLite
+  integration test.
+- TRM-004 memperbaiki packaging, dependency profiles, constraints Python 3.12, dan CI smoke test;
+  wheel lokal sudah berhasil dibangun dan di-import.
+- End-to-end training pipeline yang membutuhkan Spark belum tervalidasi pada environment saat ini
+  karena Java/Netty gagal membuat loopback connection.
+- GitHub Actions dan pre-commit belum boleh disebut green tanpa bukti eksekusi pada commit yang
+  sama.
+
+Detail pekerjaan dan acceptance criteria berada di `docs/tickets/TRM-003-complete-mlflow-name-migration.md`
+dan `docs/tickets/TRM-004-packaging-dependencies-ci.md`.
+
 ## 2. Scope
 
 ### In scope
@@ -61,6 +78,11 @@ Training Run
 ```
 
 Local development menggunakan MLflow tracking URI berbasis SQLite. Tracking storage dan model artifacts tidak boleh masuk Git.
+
+Versi dependency yang didukung adalah `mlflow>=3.0,<4.0`. Wrapper aplikasi tetap menerima nama
+argumen internal `artifact_path`, lalu meneruskannya ke MLflow 3.x sebagai `name=artifact_path`.
+Field internal `LoggedModel.artifact_path` sengaja dipertahankan agar referensi artifact dan
+serialization tetap backward-compatible.
 
 ## 4. Tracking Contract
 
@@ -116,18 +138,34 @@ ml/
     └── metadata.py
 
 pipelines/
-└── track_training_run.py
+├── train_models.py
+└── promote_model.py
 
 tests/
 ├── unit/
+│   ├── test_tracking_client.py
 │   ├── test_tracking_metadata.py
 │   ├── test_tracking_logging.py
-│   └── test_model_registry.py
+│   └── test_tracking_registry.py
 └── integration/
     └── test_mlflow_training_run.py
 ```
 
 Nama modul dapat disesuaikan saat implementasi selama tracking dan registry responsibilities tetap terpisah.
+
+### Evidence matrix
+
+| Capability | Current evidence | Status |
+|---|---|---|
+| Local SQLite tracking | `configs/tracking.yaml` dan `MlflowTrackingClient` | Terverifikasi |
+| Parameter/metric/artifact logging | `pipelines/train_models.py` dan unit tests | Terimplementasi; E2E Spark pending |
+| Candidate registration dan load | SQLite integration test | Terverifikasi |
+| Explicit candidate → staging/production promotion | `pipelines/promote_model.py` dan integration test | Terverifikasi |
+| MLflow 3.x `name` migration | `ml/tracking/client.py`, registry, fakes | Terverifikasi |
+| Feature-contract version pada metadata run | Belum dilog sebagai field eksplisit di pipeline | Pending TRM-006 |
+| Model signature/input example | Runtime gagal karena inference masih meminta target | Pending TRM-015 |
+| Full Spark training run | Blocked oleh loopback Java/Netty pada environment saat ini | Pending supported runtime |
+| CI/pre-commit gate | Belum dieksekusi pada commit ini | Pending |
 
 ## 6. Step-by-Step Implementation Plan
 
@@ -217,7 +255,9 @@ Implementation:
 - Gunakan flavor yang sesuai untuk Logistic Regression dan Random Forest.
 - Gunakan flavor yang sesuai untuk XGBoost.
 - Register hanya production candidate, bukan semua model secara otomatis.
-- Simpan model signature dan input example jika memungkinkan.
+- Model signature dan input example sudah dicoba pada TRM-006, tetapi runtime validation membuktikan
+  model wrapper masih meminta target saat inference. Hard gate dan feature-only contract ditangani
+  oleh TRM-015 sebelum TRM-007.
 - Verifikasi model yang terdaftar dapat dimuat kembali.
 
 ### Step 7 — Implement Model Promotion Workflow
@@ -263,10 +303,11 @@ Implementation:
 - Menutup run secara aman ketika terjadi exception.
 - Menyimpan run ID dan registered model version pada summary.
 
-Status: **Completed.** `python -m pipelines.train_models` membaca
-`configs/tracking.yaml`, membuat parent run dan nested validation/final runs, mencatat
-parameter, metadata dataset, threshold analysis, validation/final-test metrics, evaluation
-report, serta mendaftarkan hanya model candidate.
+Status: **Implemented; end-to-end validation pending.** `python -m pipelines.train_models` membaca
+`configs/tracking.yaml`, membuat parent run dan nested validation/final runs, mencatat parameter,
+metadata dataset, threshold analysis, validation/final-test metrics, evaluation report, serta
+mendaftarkan hanya model candidate. Eksekusi penuh yang memerlukan Spark belum dapat dibuktikan pada
+environment saat ini.
 
 ### Step 9 — Add Tests and Quality Gates
 
@@ -287,11 +328,13 @@ Quality checks:
 - Pytest passed.
 - Ruff passed.
 - Format check passed.
-- Pre-commit passed.
-- GitHub Actions tetap green.
+- Pre-commit harus passed pada commit yang sama.
+- GitHub Actions harus green pada commit yang sama.
 
-Status: **Completed in code.** Unit test promotion dan integration test MLflow ditambahkan;
-integration test akan di-skip hanya jika dependency MLflow tidak tersedia pada environment.
+Status: **Partially verified.** Unit test registry/client dan dua SQLite integration test berhasil.
+Ruff, format check, compile check, serta wheel smoke test juga berhasil. Test yang memulai Spark
+belum dapat dijalankan pada sandbox Windows karena loopback connection Java/Netty gagal; kondisi ini
+harus dipisahkan dari hasil assertion test. Pre-commit dan GitHub Actions masih pending evidence.
 
 ## 7. Expected Outputs
 
@@ -300,6 +343,8 @@ Setelah Sprint 3 selesai, repository diharapkan memiliki:
 - MLflow experiment `transaction-risk-classification`.
 - Training run dengan parameter dan metrics lengkap.
 - Evaluation report sebagai MLflow artifact.
+- Dataset lineage manifest, feature-contract version, model signature, dan input example sebagai
+  MLflow artifacts/model metadata (TRM-006).
 - Registered model `transaction-risk-model`.
 - Production candidate dengan version metadata.
 - Model yang dapat dimuat kembali melalui MLflow.
@@ -308,11 +353,11 @@ Setelah Sprint 3 selesai, repository diharapkan memiliki:
 
 ## 8. Definition of Done
 
-**Status implementasi: selesai. Status Sprint 3: menunggu quality-gate akhir.**
+**Status implementasi: capability tersedia. Status Sprint 3: quality-gate pending.**
 
-Seluruh capability Step 1–9 telah diimplementasikan dan flow MLflow registry telah
-diverifikasi melalui integration test SQLite. Checklist yang masih terbuka hanya
-verifikasi end-to-end yang memerlukan runtime Spark normal serta gate repository/CI.
+Capability utama Step 1–9 telah tersedia di codebase dan flow MLflow registry telah diverifikasi
+melalui integration test SQLite. Namun metadata feature-contract/signature, verifikasi end-to-end
+yang memerlukan runtime Spark normal, serta gate repository/CI masih terbuka.
 
 - [x] MLflow dependency ditambahkan dan terdokumentasi.
 - [x] Tracking configuration tersedia.
@@ -328,14 +373,17 @@ verifikasi end-to-end yang memerlukan runtime Spark normal serta gate repository
 - [x] Model version memiliki metadata yang lengkap.
 - [x] Promotion workflow candidate/staging/production terdokumentasi.
 - [x] Model registered dapat dimuat kembali.
+- [ ] Feature-contract version tercatat eksplisit pada run/model metadata.
+- [ ] Model signature dan representative input example tervalidasi.
 - [ ] Training run + tracking dapat direproduksi end-to-end dari configuration pada runtime Spark normal.
 - [x] Unit test tracking tersedia dan passed.
 - [x] Integration test MLflow tersedia dan passed.
 - [x] Ruff passed.
 - [x] Format check passed.
-- [ ] Full pytest suite passed (terblokir di sandbox: Spark/Java tidak dapat membuka loopback socket).
-- [ ] Pre-commit passed.
-- [ ] GitHub Actions tetap green.
+- [ ] Full pytest suite passed — belum tervalidasi; test Spark terblokir pada sandbox Windows oleh
+  kegagalan loopback Java/Netty.
+- [ ] Pre-commit passed pada commit yang sama.
+- [ ] GitHub Actions tetap green pada commit yang sama.
 
 ## 9. Sprint 3 Completion Criteria
 

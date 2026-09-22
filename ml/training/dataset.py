@@ -7,14 +7,20 @@ transaction identifiers cannot leak between splits.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
-from ml.data.split import MODEL_FEATURE_COLUMNS, TARGET_COLUMN
+from ml.contracts.features import (
+    FORBIDDEN_MODEL_FEATURE_COLUMNS,
+    MODEL_FEATURE_COLUMNS,
+    validate_model_feature_columns,
+)
+from ml.data.split import TARGET_COLUMN
 
 TRANSACTION_ID_COLUMN = "transaction_id"
 SPLIT_NAMES = ("train", "validation", "test")
@@ -31,6 +37,8 @@ class SplitSummary:
     row_count: int
     positive_target_count: int
     negative_target_count: int
+    min_timestamp: str | None = None
+    max_timestamp: str | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +50,7 @@ class TrainingDatasetSummary:
     target_column: str
     duplicate_transaction_id_counts: dict[str, int]
     overlapping_transaction_id_counts: dict[str, int]
+    time_ranges: dict[str, dict[str, str | None]] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a serialization-friendly representation."""
@@ -52,6 +61,8 @@ class TrainingDatasetSummary:
                     "row_count": summary.row_count,
                     "positive_target_count": summary.positive_target_count,
                     "negative_target_count": summary.negative_target_count,
+                    "min_timestamp": summary.min_timestamp,
+                    "max_timestamp": summary.max_timestamp,
                 }
                 for name, summary in self.split_summaries.items()
             },
@@ -59,6 +70,7 @@ class TrainingDatasetSummary:
             "target_column": self.target_column,
             "duplicate_transaction_id_counts": self.duplicate_transaction_id_counts,
             "overlapping_transaction_id_counts": self.overlapping_transaction_id_counts,
+            "time_ranges": self.time_ranges or {},
         }
 
 
@@ -84,14 +96,25 @@ def load_training_dataset(
     features_path: str | Path,
     *,
     target_column: str = TARGET_COLUMN,
-    model_feature_columns: tuple[str, ...] = tuple(MODEL_FEATURE_COLUMNS),
+    model_feature_columns: tuple[str, ...] | None = None,
+    allow_custom_feature_columns: bool = False,
 ) -> TrainingDatasetBundle:
     """Read and validate the Sprint 1 feature splits from Parquet.
 
     The loader only accepts the canonical ``train``, ``validation``, and
     ``test`` directories below ``features_path``. It does not modify or
-    rewrite the source data.
+    rewrite the source data. Custom feature lists are rejected by default; the
+    explicit opt-in exists only for isolated synthetic tests or a separately
+    versioned model contract.
     """
+
+    selected_feature_columns = (
+        tuple(MODEL_FEATURE_COLUMNS)
+        if model_feature_columns is None
+        else tuple(model_feature_columns)
+    )
+    if model_feature_columns is None or not allow_custom_feature_columns:
+        validate_model_feature_columns(selected_feature_columns)
 
     root = Path(features_path)
     splits: dict[str, DataFrame] = {}
@@ -108,7 +131,8 @@ def load_training_dataset(
             dataframe,
             split_name=split_name,
             target_column=target_column,
-            model_feature_columns=model_feature_columns,
+            model_feature_columns=selected_feature_columns,
+            allow_custom_feature_columns=allow_custom_feature_columns,
         )
         splits[split_name] = dataframe
 
@@ -135,12 +159,23 @@ def load_training_dataset(
         split_name: _build_split_summary(dataframe, target_column)
         for split_name, dataframe in splits.items()
     }
+    time_ranges = _load_time_ranges(root)
+    if time_ranges:
+        split_summaries = {
+            split_name: replace(
+                summary,
+                min_timestamp=time_ranges.get(split_name, {}).get("min"),
+                max_timestamp=time_ranges.get(split_name, {}).get("max"),
+            )
+            for split_name, summary in split_summaries.items()
+        }
     summary = TrainingDatasetSummary(
         split_summaries=split_summaries,
-        feature_columns=tuple(model_feature_columns),
+        feature_columns=selected_feature_columns,
         target_column=target_column,
         duplicate_transaction_id_counts=duplicate_counts,
         overlapping_transaction_id_counts=overlap_counts,
+        time_ranges=time_ranges,
     )
     return TrainingDatasetBundle(
         train=splits["train"],
@@ -156,6 +191,7 @@ def _validate_split_schema(
     split_name: str,
     target_column: str,
     model_feature_columns: tuple[str, ...],
+    allow_custom_feature_columns: bool,
 ) -> None:
     required_columns = {
         TRANSACTION_ID_COLUMN,
@@ -171,19 +207,12 @@ def _validate_split_schema(
     if len(set(model_feature_columns)) != len(model_feature_columns):
         raise TrainingDatasetContractError("model_feature_columns contains duplicates")
 
-    forbidden_columns = {
-        TRANSACTION_ID_COLUMN,
-        target_column,
-        "is_flagged_fraud",
-        "timestamp",
-        "origin_account_id",
-        "destination_account_id",
-    }
-    forbidden_features = forbidden_columns.intersection(model_feature_columns)
-    if forbidden_features:
-        raise TrainingDatasetContractError(
-            f"Forbidden columns included as model features: {sorted(forbidden_features)}"
-        )
+    if not allow_custom_feature_columns:
+        forbidden_features = FORBIDDEN_MODEL_FEATURE_COLUMNS.intersection(model_feature_columns)
+        if forbidden_features:
+            raise TrainingDatasetContractError(
+                f"Forbidden columns included as model features: {sorted(forbidden_features)}"
+            )
 
 
 def _count_duplicate_transaction_ids(dataframe: DataFrame) -> int:
@@ -206,13 +235,55 @@ def _count_split_overlaps(splits: dict[str, DataFrame]) -> dict[str, int]:
 
 
 def _build_split_summary(dataframe: DataFrame, target_column: str) -> SplitSummary:
-    counts = dataframe.agg(
+    aggregations = [
         F.count(F.lit(1)).alias("row_count"),
         F.sum(F.when(F.col(target_column) == 1, 1).otherwise(0)).alias("positive_target_count"),
         F.sum(F.when(F.col(target_column) == 0, 1).otherwise(0)).alias("negative_target_count"),
+    ]
+    if "timestamp" in dataframe.columns:
+        aggregations.extend(
+            [
+                F.min("timestamp").alias("min_timestamp"),
+                F.max("timestamp").alias("max_timestamp"),
+            ]
+        )
+    counts = dataframe.agg(
+        *aggregations,
     ).first()
+    count_values = counts.asDict()
     return SplitSummary(
-        row_count=int(counts["row_count"] or 0),
-        positive_target_count=int(counts["positive_target_count"] or 0),
-        negative_target_count=int(counts["negative_target_count"] or 0),
+        row_count=int(count_values["row_count"] or 0),
+        positive_target_count=int(count_values["positive_target_count"] or 0),
+        negative_target_count=int(count_values["negative_target_count"] or 0),
+        min_timestamp=(
+            str(count_values["min_timestamp"])
+            if count_values.get("min_timestamp") is not None
+            else None
+        ),
+        max_timestamp=(
+            str(count_values["max_timestamp"])
+            if count_values.get("max_timestamp") is not None
+            else None
+        ),
     )
+
+
+def _load_time_ranges(root: Path) -> dict[str, dict[str, str | None]]:
+    lineage_path = root / "lineage.json"
+    if not lineage_path.is_file():
+        return {}
+    try:
+        payload = json.loads(lineage_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    ranges = payload.get("split_time_ranges") if isinstance(payload, dict) else None
+    if not isinstance(ranges, dict):
+        return {}
+    return {
+        split_name: {
+            "min": value.get("min") if isinstance(value, dict) else None,
+            "max": value.get("max") if isinstance(value, dict) else None,
+        }
+        for split_name, value in ranges.items()
+        if split_name in SPLIT_NAMES
+    }

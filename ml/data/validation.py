@@ -64,22 +64,27 @@ def validate_paysim(df: DataFrame) -> ValidationResult:
     if missing_columns:
         raise ValueError(f"Missing required columns: {sorted(missing_columns)}")
 
-    row_count = df.count()
-
     null_condition = F.lit(False)
-
     for column in df.columns:
         null_condition = null_condition | F.col(column).isNull()
-
-    null_count = df.filter(null_condition).count()
-
-    invalid_amount_count = df.filter(F.col("amount") < 0).count()
-
-    invalid_fraud_label_count = df.filter(~F.col("isFraud").isin(0, 1)).count()
-
-    invalid_flagged_fraud_count = df.filter(~F.col("isFlaggedFraud").isin(0, 1)).count()
-
-    invalid_step_count = df.filter(F.col("step") < 0).count()
+    summary = df.agg(
+        F.count(F.lit(1)).alias("row_count"),
+        F.sum(F.when(null_condition, 1).otherwise(0)).alias("null_count"),
+        F.sum(F.when(F.col("amount") < 0, 1).otherwise(0)).alias("invalid_amount_count"),
+        F.sum(F.when(~F.col("isFraud").isin(0, 1), 1).otherwise(0)).alias(
+            "invalid_fraud_label_count"
+        ),
+        F.sum(F.when(~F.col("isFlaggedFraud").isin(0, 1), 1).otherwise(0)).alias(
+            "invalid_flagged_fraud_count"
+        ),
+        F.sum(F.when(F.col("step") < 0, 1).otherwise(0)).alias("invalid_step_count"),
+    ).first()
+    row_count = int(summary["row_count"] or 0)
+    null_count = int(summary["null_count"] or 0)
+    invalid_amount_count = int(summary["invalid_amount_count"] or 0)
+    invalid_fraud_label_count = int(summary["invalid_fraud_label_count"] or 0)
+    invalid_flagged_fraud_count = int(summary["invalid_flagged_fraud_count"] or 0)
+    invalid_step_count = int(summary["invalid_step_count"] or 0)
 
     is_valid = all(
         [
@@ -133,8 +138,6 @@ def validate_canonical_schema(df: DataFrame) -> None:
 def validate_canonical_data(df: DataFrame) -> CanonicalValidationResult:
     validate_canonical_schema(df)
 
-    row_count = df.count()
-
     required_columns = [
         "transaction_id",
         "timestamp",
@@ -148,32 +151,41 @@ def validate_canonical_data(df: DataFrame) -> CanonicalValidationResult:
 
     missing_column_count = sum(column not in df.columns for column in required_columns)
 
-    null_condition = None
-
+    null_condition = F.lit(False)
     for column in required_columns:
-        condition = F.col(column).isNull()
-
-        null_condition = condition if null_condition is None else null_condition | condition
-
-    null_count = df.filter(null_condition).count()
-
-    invalid_transaction_id_count = df.filter(
-        F.col("transaction_id").isNull() | (F.length("transaction_id") != 64)
-    ).count()
-
+        null_condition = null_condition | F.col(column).isNull()
+    summary = df.agg(
+        F.count(F.lit(1)).alias("row_count"),
+        F.sum(F.when(null_condition, 1).otherwise(0)).alias("null_count"),
+        F.sum(
+            F.when(
+                F.col("transaction_id").isNull() | (F.length("transaction_id") != 64),
+                1,
+            ).otherwise(0)
+        ).alias("invalid_transaction_id_count"),
+        F.sum(F.when(F.col("amount").isNull() | (F.col("amount") < 0), 1).otherwise(0)).alias(
+            "invalid_amount_count"
+        ),
+        F.sum(F.when(~F.col("is_fraud").isin(0, 1), 1).otherwise(0)).alias(
+            "invalid_fraud_label_count"
+        ),
+        F.sum(F.when(~F.col("is_flagged_fraud").isin(0, 1), 1).otherwise(0)).alias(
+            "invalid_flagged_fraud_count"
+        ),
+        F.sum(
+            F.when(~F.col("transaction_type").isin(*VALID_TRANSACTION_TYPES), 1).otherwise(0)
+        ).alias("invalid_transaction_type_count"),
+    ).first()
+    row_count = int(summary["row_count"] or 0)
+    null_count = int(summary["null_count"] or 0)
+    invalid_transaction_id_count = int(summary["invalid_transaction_id_count"] or 0)
+    invalid_amount_count = int(summary["invalid_amount_count"] or 0)
+    invalid_fraud_label_count = int(summary["invalid_fraud_label_count"] or 0)
+    invalid_flagged_fraud_count = int(summary["invalid_flagged_fraud_count"] or 0)
+    invalid_transaction_type_count = int(summary["invalid_transaction_type_count"] or 0)
     duplicate_transaction_id_count = (
         df.groupBy("transaction_id").count().filter(F.col("count") > 1).count()
     )
-
-    invalid_amount_count = df.filter(F.col("amount").isNull() | (F.col("amount") < 0)).count()
-
-    invalid_fraud_label_count = df.filter(~F.col("is_fraud").isin(0, 1)).count()
-
-    invalid_flagged_fraud_count = df.filter(~F.col("is_flagged_fraud").isin(0, 1)).count()
-
-    invalid_transaction_type_count = df.filter(
-        ~F.col("transaction_type").isin(*VALID_TRANSACTION_TYPES)
-    ).count()
 
     is_valid = all(
         [
@@ -207,18 +219,20 @@ def validate_transaction_domain(
 ) -> DomainValidationResult:
     validate_canonical_schema(df)
 
-    negative_balance_count = df.filter(build_negative_balance_condition()).count()
-
-    inconsistent_origin_balance_count = df.filter(
-        build_origin_balance_inconsistency_condition()
-    ).count()
-
-    inconsistent_destination_balance_count = df.filter(
-        build_destination_balance_inconsistency_condition()
-    ).count()
+    summary = df.agg(
+        F.sum(F.when(build_negative_balance_condition(), 1).otherwise(0)).alias(
+            "negative_balance_count"
+        ),
+        F.sum(F.when(build_origin_balance_inconsistency_condition(), 1).otherwise(0)).alias(
+            "origin_balance_mismatch_count"
+        ),
+        F.sum(F.when(build_destination_balance_inconsistency_condition(), 1).otherwise(0)).alias(
+            "destination_balance_mismatch_count"
+        ),
+    ).first()
 
     return DomainValidationResult(
-        negative_balance_count=negative_balance_count,
-        origin_balance_mismatch_count=inconsistent_origin_balance_count,
-        destination_balance_mismatch_count=inconsistent_destination_balance_count,
+        negative_balance_count=int(summary["negative_balance_count"] or 0),
+        origin_balance_mismatch_count=int(summary["origin_balance_mismatch_count"] or 0),
+        destination_balance_mismatch_count=int(summary["destination_balance_mismatch_count"] or 0),
     )

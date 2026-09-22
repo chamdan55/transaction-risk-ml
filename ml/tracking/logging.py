@@ -37,18 +37,33 @@ def log_validation_metrics(
     client: MlflowTrackingClient,
     *,
     model_name: str,
-    selected_evaluation: ThresholdEvaluation,
+    selected_evaluation: ThresholdEvaluation | None,
     threshold_evaluations: list[ThresholdEvaluation] | tuple[ThresholdEvaluation, ...],
+    rejection_reason: str | None = None,
 ) -> dict[str, float]:
-    """Log selected validation metrics and the threshold sweep artifact."""
+    """Log validation results, including an auditable rejected threshold sweep."""
 
-    metrics = _validation_metrics(selected_evaluation.metrics)
-    metrics["validation.selected_threshold"] = selected_evaluation.metrics.threshold
-    metrics["validation.expected_cost"] = selected_evaluation.expected_cost
+    if not threshold_evaluations:
+        raise TrackingClientError("threshold_evaluations must not be empty")
+    reference_metrics = (
+        selected_evaluation.metrics
+        if selected_evaluation is not None
+        else threshold_evaluations[0].metrics
+    )
+    metrics = _validation_metrics(reference_metrics)
+    metrics["validation.quality_gate_passed"] = float(selected_evaluation is not None)
+    metrics["validation.maximum_candidate_recall"] = max(
+        evaluation.metrics.recall for evaluation in threshold_evaluations
+    )
+    if selected_evaluation is not None:
+        metrics["validation.selected_threshold"] = selected_evaluation.metrics.threshold
+        metrics["validation.expected_cost"] = selected_evaluation.expected_cost
     client.log_metrics(metrics)
     client.log_dict(
         {
             "model_name": model_name,
+            "status": "eligible" if selected_evaluation is not None else "rejected",
+            "rejection_reason": rejection_reason,
             "evaluations": [evaluation.as_dict() for evaluation in threshold_evaluations],
         },
         f"threshold_analysis/{model_name}.json",
@@ -87,4 +102,6 @@ def _validation_metrics(metrics: BinaryClassificationMetrics) -> dict[str, float
         "validation.f1": metrics.f1,
         "validation.roc_auc": metrics.roc_auc,
         "validation.pr_auc": metrics.pr_auc,
+        "validation.brier_score": metrics.brier_score,
+        "validation.alert_rate": metrics.alert_rate,
     }

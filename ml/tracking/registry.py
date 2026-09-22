@@ -36,6 +36,8 @@ def log_and_register_model(
     artifact_path: str = "model",
     registered_model_name: str | None = None,
     version_tags: dict[str, str] | None = None,
+    signature: Any | None = None,
+    input_example: Any | None = None,
 ) -> LoggedModel:
     """Log one complete model bundle and return its registry reference."""
 
@@ -45,6 +47,8 @@ def log_and_register_model(
         model,
         artifact_path=artifact_path,
         registered_model_name=registered_model_name,
+        signature=signature,
+        input_example=input_example,
     )
     model_uri = getattr(model_info, "model_uri", None)
     if not isinstance(model_uri, str) or not model_uri:
@@ -52,7 +56,9 @@ def log_and_register_model(
     registered_version = getattr(model_info, "registered_model_version", None)
     reference = LoggedModel(
         model_name=model_name,
-        name=artifact_path,
+        # ``name`` is the MLflow 3.x API keyword; ``artifact_path`` remains the
+        # stable name of the internal registry reference field.
+        artifact_path=artifact_path,
         model_uri=model_uri,
         registered_model_name=registered_model_name,
         registered_model_version=(

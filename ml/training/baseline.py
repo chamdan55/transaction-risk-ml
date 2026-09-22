@@ -54,6 +54,11 @@ def train_logistic_regression_baseline(
     transformed_features = preprocessor.fit_transform(train_frame)
 
     model_params = dict(config.model_params["logistic_regression"])
+    if config.imbalance_strategy == "class_weight":
+        model_params.setdefault("class_weight", "balanced")
+    elif config.imbalance_strategy == "negative_sampling":
+        # Sampling already changes the class distribution deliberately; do not weight again.
+        model_params.pop("class_weight", None)
     if model_params.get("class_weight") == "balanced":
         model_params["class_weight"] = balanced_class_weight(target_distribution)
     model_params.setdefault("random_state", config.random_seed)

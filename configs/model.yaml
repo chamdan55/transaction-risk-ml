@@ -1,6 +1,7 @@
 data:
   features_path: data/processed/features
   target_column: is_fraud
+  feature_contract_version: pre-transaction-v1
   excluded_columns:
     - transaction_id
     - timestamp
@@ -8,11 +9,30 @@ data:
     - destination_account_id
     - is_fraud
     - is_flagged_fraud
+    - origin_balance_after
+    - destination_balance_after
+    - origin_balance_delta
+    - destination_balance_delta
+    - origin_balance_change_ratio
+    - destination_balance_change_ratio
+    - origin_balance_mismatch
+    - destination_balance_mismatch
+    - origin_balance_depleted
+    - destination_balance_increased
+    - transactions_last_1h
+    - transactions_last_24h
+    - amount_sum_last_24h
+    - unique_destinations_last_30d
 
 training:
   random_seed: 42
   primary_metric: pr_auc
-  imbalance_strategy: balanced
+  # Use one imbalance strategy at a time. Negative sampling keeps every positive and samples
+  # negatives; estimators must not apply a second balanced class weight on top of it.
+  imbalance_strategy: negative_sampling
+  evaluation_sampling_strategy: full
+  # Final test is a frozen, full-period quality gate by default. Sampling is opt-in only.
+  final_test_sampling_strategy: full
   sampling:
     max_rows:
       train: 200000
@@ -22,11 +42,9 @@ training:
 models:
   logistic_regression:
     max_iter: 1000
-    class_weight: balanced
   random_forest:
     n_estimators: 200
     max_depth: null
-    class_weight: balanced
     n_jobs: -1
   xgboost:
     n_estimators: 200
@@ -38,6 +56,16 @@ models:
     tree_method: hist
 
 evaluation:
+  # Assumption pending business-owner calibration; replace with approved monetary/operational
+  # impact values before production use.
+  business_costs:
+    false_positive: 1.0
+    false_negative: 5.0
+    assumptions: true
+  minimum_recall: 0.80
+  threshold_selection_strategy: business_cost
+  threshold_metric: f1
+  calibration_bins: 10
   thresholds:
     - 0.10
     - 0.20
@@ -48,3 +76,4 @@ evaluation:
 outputs:
   model_directory: artifacts/models
   evaluation_report: artifacts/evaluation_report.json
+  model_card: artifacts/model_card.md

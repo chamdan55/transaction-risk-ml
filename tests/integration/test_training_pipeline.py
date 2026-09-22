@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from dataclasses import replace
 
 import pytest
@@ -58,6 +59,12 @@ def test_training_pipeline_writes_reproducible_artifacts(spark, tmp_path):
         "xgboost",
     )
     assert config.evaluation_report.exists()
+    report = json.loads(first_report)
+    assert set(report["validation"]) == set(first_summary.model_names)
+    assert all(
+        {"status", "selected_threshold", "threshold_evaluations"}.issubset(model_report)
+        for model_report in report["validation"].values()
+    )
     assert all(
         (config.model_directory / f"{model_name}.joblib").exists()
         for model_name in first_summary.model_names

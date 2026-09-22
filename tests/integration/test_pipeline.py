@@ -4,6 +4,7 @@ import pytest
 import yaml
 from pyspark.sql import SparkSession
 
+from ml.data.split import MODEL_DATASET_COLUMNS
 from pipelines.run_pipeline import run_pipeline
 
 RAW_HEADER = (
@@ -78,10 +79,11 @@ def test_run_pipeline_completes_from_raw_csv_to_split_parquet(
     assert summary.target_column == "is_fraud"
 
     output_root = Path(summary.feature_output_path)
-    assert (output_root / "_SUCCESS").exists()
+    assert (output_root / "audit" / "_SUCCESS").exists()
     assert (output_root / "train" / "_SUCCESS").exists()
     assert (output_root / "validation" / "_SUCCESS").exists()
     assert (output_root / "test" / "_SUCCESS").exists()
+    assert spark.read.parquet(str(output_root / "train")).columns == list(MODEL_DATASET_COLUMNS)
 
 
 def test_run_pipeline_fails_before_writing_canonical_output_for_invalid_raw_data(

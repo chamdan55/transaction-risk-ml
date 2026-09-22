@@ -79,3 +79,29 @@ def test_validation_metrics_and_threshold_analysis_are_logged():
     assert fake_mlflow.logged_metrics == metrics
     assert fake_mlflow.logged_dict[0]["model_name"] == "xgboost"
     assert fake_mlflow.logged_dict[1] == "threshold_analysis/xgboost.json"
+
+
+def test_rejected_validation_metrics_keep_the_threshold_sweep_traceable():
+    fake_mlflow = FakeMlflow()
+    client = MlflowTrackingClient(
+        TrackingConfig("mlruns", "fraud", "risk-model", "mlartifacts"),
+        _mlflow=fake_mlflow,
+    )
+    evaluations = analyze_thresholds(
+        [0, 0, 1, 1],
+        [0.05, 0.20, 0.60, 0.70],
+        [0.8],
+    )
+
+    metrics = log_validation_metrics(
+        client,
+        model_name="logistic_regression",
+        selected_evaluation=None,
+        threshold_evaluations=evaluations,
+        rejection_reason="No threshold satisfies the minimum recall",
+    )
+
+    assert metrics["validation.quality_gate_passed"] == 0.0
+    assert "validation.selected_threshold" not in metrics
+    assert fake_mlflow.logged_dict[0]["status"] == "rejected"
+    assert fake_mlflow.logged_dict[0]["rejection_reason"] is not None
