@@ -1,14 +1,18 @@
-# TRM-009 — Build Minimal Images and Docker Compose Runtime
+# TRM-009 — Build Minimal Images and Podman Compose Runtime
 
 **Type:** Deployment capability
 **Priority:** P1
 **Sprint:** 5
 **Dependencies:** TRM-004, TRM-008
-**Status:** Blocked
+**Status:** Implemented — awaiting owner Podman validation
+
+**Implementation note:** A serving-boundary hotfix removes the accidental top-level PySpark import
+encountered while deserializing the existing Joblib artifact. Rebuild the serving image before
+retesting readiness; model retraining is not required.
 
 ## Problem
 
-The project has no usable Docker image or reproducible local service topology. A single image with
+The project has no usable container image or reproducible local service topology. A single image with
 Spark, training, tracking, and serving dependencies would be unnecessarily large and risky.
 
 ## Scope
@@ -16,7 +20,7 @@ Spark, training, tracking, and serving dependencies would be unnecessarily large
 - Create separate minimal serving and training image targets.
 - Use pinned base image/digest strategy, multi-stage builds, non-root user, and healthcheck.
 - Ensure serving image installs built artifacts rather than bind-mounting source.
-- Add Docker Compose profiles for the minimum API demo and optional MLflow/PostgreSQL/MinIO stack.
+- Add Podman Compose profiles for the minimum API demo and optional MLflow/PostgreSQL/MinIO stack.
 - Configure volumes, networks, secrets/env files, and startup dependencies safely.
 - Add image smoke tests, vulnerability scanning, and SBOM generation in CI.
 - Add `make up`, `make down`, and documented clean-reset behavior.
@@ -37,9 +41,9 @@ Spark, training, tracking, and serving dependencies would be unnecessarily large
 ## Suggested Validation
 
 ```powershell
-docker build --target serving .
-docker compose up --build
-docker compose ps
+podman build --target serving .
+podman compose up --build
+podman compose ps
 pytest tests/integration/test_container_smoke.py
 ```
 

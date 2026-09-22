@@ -23,7 +23,7 @@ Aturan status:
 | 3 | Reopened | Reliable tracking and registry | TRM-003, TRM-004 |
 | 3.5 | Required next | Architecture and model hardening | TRM-001–TRM-006, TRM-014, TRM-015 |
 | 4 | In progress | Model serving | TRM-007 implemented; TRM-008 pending |
-| 5 | Planned | Containerization and deployment | TRM-009, TRM-010 |
+| 5 | In progress | Containerization and deployment | TRM-009 implemented; TRM-010 pending |
 | 6 | Planned | System and ML observability | TRM-011, TRM-012 |
 | 7 | Planned | Controlled retraining and promotion | TRM-013 |
 
@@ -249,10 +249,10 @@ GET  /metrics
 
 Tracked by: **TRM-007** and **TRM-008**.
 
-Implementation note: **TRM-007** now provides a lifespan-managed local-artifact or MLflow-alias
-loader, contract-derived pre-transaction features, prediction/readiness/model-info endpoints, and
-focused API contract tests. Authentication, request limits, safe prediction-event logging, and
-concurrency coverage remain in **TRM-008**.
+Implementation note: **TRM-007** provides a lifespan-managed local-artifact or MLflow-alias loader,
+contract-derived pre-transaction features, prediction/readiness/model-info endpoints, and focused
+API contract tests. **TRM-008** adds optional API-key authentication, bounded body/concurrency/time
+limits, in-memory idempotency, correlation IDs, privacy-safe errors/logs, and security tests.
 
 ### Definition of Done
 
@@ -261,8 +261,10 @@ concurrency coverage remain in **TRM-008**.
 - [x] Unknown, missing, and invalid fields are rejected, not silently defaulted (TRM-007).
 - [x] Readiness is false until model and schema are valid (TRM-007).
 - [x] Model version and threshold are observable (TRM-007).
-- [ ] No secret, account ID, or raw sensitive payload appears in logs.
-- [ ] API integration and concurrency tests pass.
+- [x] No secret, account ID, or raw sensitive payload is included in API error responses or
+  application prediction logs (TRM-008; owner validation pending).
+- [x] API security, idempotency, timeout, OpenAPI, and concurrency tests are implemented
+  (TRM-008; owner validation pending).
 
 ## 9. Sprint 5 — Containerization and Deployment
 
@@ -271,12 +273,12 @@ concurrency coverage remain in **TRM-008**.
 Menyediakan reproducible serving runtime, membuktikan performance envelope, lalu mendemonstrasikan
 orchestration tanpa mengklaim HA yang tidak dimiliki local kind.
 
-### Phase A — Docker and Compose
+### Phase A — Podman and Compose
 
 - Separate serving and training images.
 - Multi-stage, non-root, minimal serving image.
 - Healthcheck and read-only filesystem where possible.
-- Docker Compose for API, MLflow profile, database/artifact services, and monitoring dependencies.
+- Podman Compose for API, MLflow profile, database/artifact services, and monitoring dependencies.
 - Image scan and SBOM.
 
 Tracked by: **TRM-009**.

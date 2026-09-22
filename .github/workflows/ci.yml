@@ -45,5 +45,46 @@ jobs:
           python -m pip install --force-reinstall --no-deps "$GITHUB_WORKSPACE"/dist/*.whl
           python -c "import app, ml, pipelines; from ml.contracts import MODEL_FEATURE_COLUMNS; assert MODEL_FEATURE_COLUMNS"
 
+      - name: Install Podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes podman
+          podman info
+
+      - name: Build minimal serving image with Podman
+        run: podman build --target serving --tag transaction-risk-serving:ci .
+
+      - name: Run serving image liveness smoke test with Podman
+        run: |
+          podman run --detach --name transaction-risk-serving-ci --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m -p 8000:8000 transaction-risk-serving:ci
+          for attempt in $(seq 1 20); do
+            if podman exec transaction-risk-serving-ci python -c "from urllib.request import urlopen; assert urlopen('http://127.0.0.1:8000/health/live', timeout=2).status == 200"; then exit 0; fi
+            sleep 1
+          done
+          podman logs transaction-risk-serving-ci
+          exit 1
+
+      - name: Export OCI image archive for security tooling
+        run: podman save --format oci-archive --output transaction-risk-serving.oci.tar transaction-risk-serving:ci
+
+      - name: Generate serving SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          file: transaction-risk-serving.oci.tar
+          artifact-name: transaction-risk-serving-sbom
+
+      - name: Scan serving image for critical vulnerabilities
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          input: transaction-risk-serving.oci.tar
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL
+
+      - name: Remove serving smoke container
+        if: always()
+        run: podman rm --force transaction-risk-serving-ci || true
+
       - name: Run tests
         run: pytest

@@ -177,7 +177,7 @@ The current architecture separates data engineering, ML logic, pipelines, tests,
 ### Packaging & Runtime
 - ```pyproject.toml```
 - Conda for local development environment
-- Docker / container runtime planned for later deployment stages
+- Podman / OCI container runtime
 
 ### Local Java Runtime
 PySpark 4.2 currently runs against:

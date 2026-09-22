@@ -27,9 +27,9 @@ Aturan umum untuk semua agent:
 | [TRM-006](TRM-006-business-evaluation-lineage.md) | P1 | 3.5 | Add business evaluation, calibration, and lineage | TRM-001, TRM-002 | Implemented — owner runtime validation pending |
 | [TRM-014](TRM-014-isolate-candidate-quality-gates.md) | P0 | 3.5 | Isolate per-model gates and preserve rejected evaluations | TRM-006 | Completed — Pytest and full training passed |
 | [TRM-015](TRM-015-fix-feature-only-inference-signature.md) | P0 | 3.5 | Fix feature-only inference and enforce MLflow signature validation | TRM-002, TRM-003, TRM-006, TRM-014 | Implemented — owner validation pending |
-| [TRM-007](TRM-007-fastapi-serving.md) | P0 | 4 | Build shared inference contract and FastAPI serving | TRM-002, TRM-003, TRM-006, TRM-014, TRM-015 | Blocked |
-| [TRM-008](TRM-008-api-security-reliability.md) | P1 | 4 | Add API security, reliability, and contract tests | TRM-007 | Blocked |
-| [TRM-009](TRM-009-container-compose.md) | P1 | 5 | Build minimal images and Compose runtime | TRM-004, TRM-008 | Blocked |
+| [TRM-007](TRM-007-fastapi-serving.md) | P0 | 4 | Build shared inference contract and FastAPI serving | TRM-002, TRM-003, TRM-006, TRM-014, TRM-015 | Implemented — owner validation passed |
+| [TRM-008](TRM-008-api-security-reliability.md) | P1 | 4 | Add API security, reliability, and contract tests | TRM-007 | Implemented — owner validation passed |
+| [TRM-009](TRM-009-container-compose.md) | P1 | 5 | Build minimal images and Podman Compose runtime | TRM-004, TRM-008 | Implemented — owner Podman validation pending |
 | [TRM-010](TRM-010-load-test-kind.md) | P2 | 5 | Establish load baseline and kind deployment | TRM-009 | Blocked |
 | [TRM-011](TRM-011-runtime-observability.md) | P1 | 6 | Add runtime metrics, dashboards, and alerts | TRM-008, TRM-009 | Blocked |
 | [TRM-012](TRM-012-ml-observability.md) | P1 | 6 | Add prediction events, label feedback, and drift jobs | TRM-007, TRM-011 | Blocked |

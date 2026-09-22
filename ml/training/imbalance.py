@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pandas as pd
-from pyspark.sql import DataFrame
-from pyspark.sql import functions as F
+
+if TYPE_CHECKING:
+    from pyspark.sql import DataFrame
 
 
 class ClassImbalanceError(ValueError):
@@ -49,6 +51,10 @@ def summarize_target(target: pd.Series) -> TargetDistribution:
 def summarize_spark_target(dataframe: DataFrame, target_column: str) -> TargetDistribution:
     """Summarize a Spark binary target without collecting target rows."""
 
+    try:
+        from pyspark.sql import functions as F
+    except ImportError as exc:
+        raise ClassImbalanceError("PySpark is required for Spark target summarization") from exc
     if target_column not in dataframe.columns:
         raise ClassImbalanceError(f"Target column not found: {target_column}")
     summary = dataframe.agg(

@@ -323,6 +323,11 @@ GET  /metrics
 service can perform a valid prediction. Configuration or secrets must not be exposed through a
 public `/config` endpoint.
 
+For local/internal use, API-key authentication is configured with `API_AUTH_ENABLED=true` and an
+`API_KEY` injected by the process environment or secret mount. Health probes remain unauthenticated;
+the reverse proxy/ingress is responsible for TLS termination, network policy, and any enterprise
+identity integration. Never pass the API key through source control, Docker image layers, or logs.
+
 ## 11. Security and Compliance Baseline
 
 - TLS terminates at the ingress/reverse proxy for non-local traffic.

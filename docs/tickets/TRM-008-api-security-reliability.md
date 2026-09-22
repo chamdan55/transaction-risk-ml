@@ -4,7 +4,7 @@
 **Priority:** P1
 **Sprint:** 4
 **Dependencies:** TRM-007
-**Status:** Blocked
+**Status:** Implemented — awaiting owner validation
 
 ## Problem
 
