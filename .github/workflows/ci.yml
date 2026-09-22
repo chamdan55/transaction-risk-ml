@@ -74,7 +74,7 @@ jobs:
           artifact-name: transaction-risk-serving-sbom
 
       - name: Scan serving image for critical vulnerabilities
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           input: transaction-risk-serving.oci.tar
           format: table
