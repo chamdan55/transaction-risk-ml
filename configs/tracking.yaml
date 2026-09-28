@@ -1,5 +1,5 @@
 tracking:
-  uri: sqlite:///mlflow.db
+  uri: http://localhost:5000
   experiment_name: transaction-risk-classification
   registered_model_name: transaction-risk-model
   artifact_location: mlartifacts

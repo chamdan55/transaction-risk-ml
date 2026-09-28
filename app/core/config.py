@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "INFO"
+    log_json: bool = False
 
     model_name: str = "transaction-risk-model"
     model_version: str = "local"
@@ -28,6 +29,9 @@ class Settings(BaseSettings):
     shutdown_grace_seconds: float = Field(default=5.0, gt=0, le=30)
     idempotency_ttl_seconds: float = Field(default=300.0, gt=0, le=3_600)
     idempotency_max_entries: int = Field(default=1_000, ge=1, le=100_000)
+    ml_monitoring_database_path: Path = Path("artifacts/monitoring/events.sqlite3")
+    ml_monitoring_queue_maxsize: int = Field(default=5_000, ge=1, le=100_000)
+    ml_monitoring_retention_days: int = Field(default=90, ge=1, le=3_650)
 
     model_config = SettingsConfigDict(
         env_file=".env",

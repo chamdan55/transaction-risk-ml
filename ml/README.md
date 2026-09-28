@@ -8,7 +8,8 @@ Folder `ml/` berisi reusable logic untuk data engineering, feature engineering, 
 - `features/` — transaction-level dan behavioral feature engineering.
 - `training/` — training dataset contract, preprocessing, imbalance handling, dan model training.
 - `evaluation/` — metrics, threshold analysis, dan production-candidate selection.
-- `monitoring/` — reserved untuk model/system monitoring pada sprint lanjutan.
+- `monitoring/` — versioned prediction/label contracts and the local SQLite event store for delayed
+  labels and drift reporting.
 
 ## Design Rules
 

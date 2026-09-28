@@ -23,9 +23,10 @@ Aturan status:
 | 3 | Reopened | Reliable tracking and registry | TRM-003, TRM-004 |
 | 3.5 | Required next | Architecture and model hardening | TRM-001–TRM-006, TRM-014, TRM-015 |
 | 4 | In progress | Model serving | TRM-007 implemented; TRM-008 pending |
-| 5 | In progress | Containerization and deployment | TRM-009 implemented; TRM-010 pending |
-| 6 | Planned | System and ML observability | TRM-011, TRM-012 |
-| 7 | Planned | Controlled retraining and promotion | TRM-013 |
+| 5 | In progress | Containerization and deployment | TRM-009 implemented; TRM-010 implementation ready for owner baseline/kind validation |
+| 6 | Completed | System and ML observability | TRM-011 and TRM-012 validated by owner |
+| 6.5 | Runtime and artifact smoke passed; training/persistence pending | Connect training and registry to containerized MLflow | TRM-016 |
+| 7 | Implementation complete; runtime validation pending | Controlled retraining and promotion | TRM-013 |
 
 ## 3. Sprint 0 — Project Foundation
 
@@ -293,6 +294,11 @@ Tracked by: **TRM-009**.
 
 Tracked by: **TRM-010**.
 
+Implementation note: **TRM-010** provides a k6 valid/invalid request-mix scenario, a sanitized baseline
+report template, and a minimal kind Deployment/Service/ConfigMap/optional Secret reference/PDB. Resource
+values remain provisional until a measured report is committed; HPA remains intentionally deferred until a
+metric signal and saturation point are demonstrated.
+
 ### Definition of Done
 
 - [ ] Clean image can start and become ready without source-tree mounts.
@@ -315,6 +321,11 @@ regression without adding heavy work to the request path.
 - Grafana dashboard and actionable alerts.
 - No PII or unbounded-cardinality labels.
 
+Implementation note: **TRM-011** exposes Prometheus-compatible API/model metrics with bounded labels,
+optional correlation-aware JSON logging, local Prometheus/Grafana provisioning, alert rules, and runbooks.
+The owner confirmed a green pytest run, verified the dashboard panels and active model name/version, and
+simulated the no-ready alert. A read-only check then confirmed API readiness and alert recovery.
+
 Tracked by: **TRM-011**.
 
 ### ML observability
@@ -326,15 +337,36 @@ Tracked by: **TRM-011**.
 
 Tracked by: **TRM-012**.
 
+Implementation note: **TRM-012** adds a versioned prediction-event contract, bounded asynchronous SQLite
+writer, pseudonymous feedback IDs, idempotent delayed-label ingestion, retention, and a separate scheduled
+Evidently/report job. The report is segmented by model and feature-contract version and includes delayed
+classification/calibration metrics when labels arrive; no automatic retraining or promotion is performed.
+The owner confirmed pytest is green and reran the Podman Compose report successfully on 2026-09-24.
+Two demo predictions and labels validated event joining and report generation; their drift/performance
+values are not statistically meaningful.
+
 ### Definition of Done
 
-- [ ] Dashboard shows request rate, p95 latency, error rate, readiness, and model version.
-- [ ] Alert scenarios are testable and documented.
-- [ ] Prediction events can be joined with delayed labels.
-- [ ] Evidently job runs asynchronously and produces reproducible reports.
-- [ ] Monitoring failure does not block synchronous prediction.
+- [x] Dashboard shows request rate, p95 latency, error rate, readiness, and model version (owner screenshots confirmed).
+- [x] Alert scenarios are testable and documented (owner simulated no-ready alert and recovery).
+- [x] Prediction events can be joined with delayed labels (two labels joined in the owner report).
+- [x] Evidently job runs asynchronously and produces reproducible reports (Compose batch job passed).
+- [x] Monitoring failure does not block synchronous prediction (owner pytest passed failure-isolation coverage).
 
-## 11. Sprint 7 — Controlled Retraining and Promotion
+## 11. Sprint 6.5 — Containerized MLflow Integration
+
+**TRM-016 startup and artifact round-trip smoke passed.** A dedicated, Spark-free MLflow tracking
+image uses PostgreSQL and private MinIO storage, with server-proxied artifacts. The host training
+and promotion commands share an explicit Compose tracking config and honor a custom host port. A
+read-only connectivity command and remote artifact/registry smoke are available. The local SQLite
+profile is preserved and its history is not migrated automatically. Host-side Spark training remains
+outside the container. The owner confirmed Podman startup and green Pytest; the artifact/registry smoke
+passed after disabling direct presigned transfers to private MinIO. Remote training and persistence
+after restart still need owner validation.
+
+Tracked by: **TRM-016**. Sprint 7 is gated on its validation.
+
+## 12. Sprint 7 — Controlled Retraining and Promotion
 
 ### Goal
 
@@ -353,18 +385,40 @@ Drift or performance alert
   -> rollback when quality or service SLO regresses
 ```
 
+Implementation is in place: one-time approved dataset manifests bind data/config/code fingerprints;
+controlled retraining compares candidate and current production on the same held-out split; quality
+rejections remain traceable without creating registry versions or moving serving aliases. Promotion
+requires explicit reviewer/reason metadata and stores the prior alias version. Production bundles
+are exported with a content-derived image tag; the kind rollout waits for readiness and attempts a
+paired registry/Deployment rollback on failure. A suspended CronJob consumes only an externally
+approved manifest. Its tracking URI must reach a secured MLflow service from the cluster; the local
+loopback Compose endpoint is not cluster-reachable by default.
+
+`configs/retraining.yaml` contains provisional PaySim demo limits that require risk-owner calibration
+before production use. See `docs/retraining.md` for runbook, approval, promotion, failure, and
+scheduler prerequisites.
+
 Tracked by: **TRM-013**.
 
 ### Definition of Done
 
-- [ ] Retraining consumes an immutable dataset manifest.
-- [ ] New model must beat configured gates, not merely the previous F1 score.
-- [ ] Failed candidates remain traceable but cannot be promoted.
-- [ ] Approval identity and reason are recorded.
-- [ ] Promotion and rollback scenarios are demonstrated end to end.
+- [x] Retraining consumes a create-once, content-addressed approved manifest and verifies the
+  current dataset/config/source fingerprints before fitting.
+- [x] Candidate gates cover schema/leakage, PR-AUC, precision, recall, business cost, Brier score,
+  calibration error, alert rate, minimum sample size, and non-regression against production on the
+  same held-out split.
+- [x] Rejected runs retain reports/model artifacts and cannot create a registry version or move an
+  alias; retraining outputs do not replace the existing serving bundle.
+- [x] Promotion requires explicit reviewer/reason and records prior/new versions and timestamps.
+- [x] Versioned model export and a kind rollout command wait for readiness and restore the prior
+  deployment/production alias on failure.
+- [x] A suspended Kubernetes CronJob provides an explicit scheduling path without auto-approval.
+- [ ] Owner runs focused Pytest and validates pass/reject, promotion, and rollback scenarios against
+  the containerized MLflow profile; the CronJob stays suspended until a reachable secured endpoint
+  and approved-data PVC are provisioned.
 - [ ] Drift alone never performs unattended production promotion.
 
-## 12. Final Project Completion Criteria
+## 13. Final Project Completion Criteria
 
 The project is complete when a reviewer can execute a documented scenario:
 

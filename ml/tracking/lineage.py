@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -95,7 +94,7 @@ def build_dataset_manifest(
     stable_payload = {
         "manifest_version": "lineage-v1",
         "dataset_name": dataset_name,
-        "dataset_path": str(root),
+        "dataset_path": root.as_posix(),
         "schema": schema_payload,
         "content_fingerprint": _hash_payload(content_payload),
         "config_fingerprint": config_fingerprint,
@@ -108,7 +107,7 @@ def build_dataset_manifest(
         manifest_version="lineage-v1",
         manifest_id=manifest_id,
         dataset_name=dataset_name,
-        dataset_path=str(root),
+        dataset_path=root.as_posix(),
         target_column=target_column,
         feature_columns=tuple(feature_columns),
         feature_contract_version=feature_contract_version,
@@ -160,23 +159,12 @@ def _file_manifest(root: Path) -> list[dict[str, Any]]:
 
 def _hash_code(repository_root: str | Path) -> str:
     root = Path(repository_root)
-    try:
-        commit = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        commit = "unknown"
     source_files = []
     for directory in (root / "ml", root / "pipelines"):
         if directory.is_dir():
             source_files.extend(path for path in directory.rglob("*.py") if path.is_file())
     return _hash_payload(
         {
-            "git_commit": commit,
             "files": [
                 {
                     "path": str(path.relative_to(root)),

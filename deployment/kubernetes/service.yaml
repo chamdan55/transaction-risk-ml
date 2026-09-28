@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: transaction-risk-api
+  namespace: transaction-risk
+  labels:
+    app.kubernetes.io/name: transaction-risk-api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: transaction-risk-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

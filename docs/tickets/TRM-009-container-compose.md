@@ -9,6 +9,9 @@
 **Implementation note:** A serving-boundary hotfix removes the accidental top-level PySpark import
 encountered while deserializing the existing Joblib artifact. Rebuild the serving image before
 retesting readiness; model retraining is not required.
+The Compose API now uses an immutable `serving-with-model` image. This removes the one-shot
+`model-seed` runtime dependency that prevented Podman from starting monitoring services after the
+seed exited successfully; CI continues to build the generic `serving` target.
 
 ## Problem
 

@@ -2,7 +2,9 @@
 
 End-to-end machine learning platform for transaction risk scoring, designed to demonstrate production-oriented Machine Learning Engineering practices across the complete ML lifecycle.
 
-> **Current status:** Sprint 0, Sprint 1, and Sprint 2 completed. The project now has a reproducible data-to-model training and evaluation flow.
+> **Current status:** serving, Podman Compose, CI container scanning, and the first kind/load-test
+> assets are implemented. The performance baseline and kind failure/rollback evidence must still be
+> collected on the owner's machine before making any capacity or availability claim.
 
 ---
 
@@ -178,6 +180,8 @@ The current architecture separates data engineering, ML logic, pipelines, tests,
 - ```pyproject.toml```
 - Conda for local development environment
 - Podman / OCI container runtime
+- k6 for repeatable API load scenarios
+- kind for an optional local Kubernetes demonstration
 
 ### Local Java Runtime
 PySpark 4.2 currently runs against:
@@ -531,6 +535,26 @@ Run all pre-commit checks:
 ```pwsh
 make pre-commit
 ```
+
+Run the repeatable API load scenario (requires a ready local API and k6):
+
+```pwsh
+make load
+```
+
+Runtime dashboards, alert runbooks, prediction-event feedback, and scheduled Evidently reports are
+documented in [`monitoring/README.md`](monitoring/README.md). Start the full local API, monitoring,
+and MLflow tracking stack with `make up`; use `make up-monitoring` when only the API and dashboards
+are needed. For a Podman Compose deployment, generate the ML report from its shared event volume with
+`make monitoring-report-compose`.
+
+The complete Podman Compose runtime instructions are in
+[`deployment/docker/README.md`](deployment/docker/README.md); the kind deployment, baseline protocol,
+and rollback exercise are in [`deployment/kubernetes/README.md`](deployment/kubernetes/README.md).
+
+> **Availability boundary:** kind is a single-node local cluster. Its two API pods, probes, rolling
+> update, and PodDisruptionBudget demonstrate process/pod resilience only. They do not provide host,
+> node, disk, or network high availability.
 
 ---
 

@@ -274,6 +274,42 @@ tracking:
 SQLite and local artifacts are acceptable for one local writer. They are not the production-like
 HA design.
 
+### Containerized tracking profile before controlled retraining
+
+TRM-016 connects host-side training and promotion to the existing optional Podman Compose MLflow,
+PostgreSQL, and MinIO stack. MLflow alone is exposed on host loopback; artifacts are proxied through
+the tracking server to private MinIO storage. Remote experiments must use server-managed artifact
+locations, while the SQLite/local profile remains available for tests and historical runs. Existing
+SQLite history is not implicitly migrated to PostgreSQL. TRM-013 must use the same validated remote
+tracking/registry endpoint for retraining and promotion.
+
+### Controlled retraining and serving release
+
+TRM-013 adds an explicit approval boundary between dataset creation, training, model promotion, and
+serving rollout. A content-addressed manifest binds the split files, feature/schema summary, model
+configuration, and training-source fingerprint. The retraining command refuses drift from that
+manifest, requires a validated production alias, evaluates the incumbent and challenger on the same
+held-out test split, and logs every gate result to MLflow. A rejected run keeps its report and model
+artifact in MLflow but creates no registry version or candidate alias. A passing run moves only the
+`candidate` alias; a human reviewer is still required for staging/production.
+
+The API continues to load a local, immutable model bundle and does not download a model on the
+prediction path. After explicit production approval, an export command packages that registry
+version and its evaluation report. The kind rollout tags the image from the model version and bundle
+digest, changes the API artifact path with the init-container image in one Deployment revision, and
+waits for readiness. A failed rollout restores the previous Deployment revision and production
+alias. This demo requires a previously promoted production version as the rollback target.
+
+The Kubernetes retraining CronJob is included but suspended. It consumes a separately approved
+manifest and a mounted feature-data PVC; it never produces approvals or promotes models. Enable it
+only after a cluster-reachable, secured MLflow endpoint and representative data storage are provisioned.
+The local Podman MLflow endpoint on host loopback is not directly reachable from a kind pod.
+
+The committed quality gates in `configs/retraining.yaml` are provisional PaySim demonstration values.
+They cover schema/leakage, PR-AUC, precision, recall, expected cost, Brier score, calibration error,
+alert rate, sample size, and non-regression against production. Risk owners must calibrate and approve
+them before any real production decision. See `docs/retraining.md` for execution and recovery steps.
+
 ### Compatibility contract
 
 - The codebase intentionally uses the MLflow 3.x `name` argument when logging a model.
@@ -357,7 +393,12 @@ identity integration. Never pass the API key through source control, Docker imag
 - Local profile uses recoverable volumes and documented reset procedures.
 - Production-like profile backs up PostgreSQL and artifact storage.
 - Registry aliases are pointers to immutable model versions.
-- Prediction events are append-only and tolerate temporary monitoring-job failures.
+- Prediction events are append-only within a configured retention window and tolerate temporary
+  monitoring-job failures.
+- The local API profile writes events through a bounded background queue into a persistent SQLite
+  volume. Queue overflow and events still in memory during an ungraceful crash may be lost; this is
+  surfaced through counters/logs. A multi-replica production deployment must replace the local store
+  with a shared durable event transport/store.
 
 ### Availability boundary
 
@@ -387,6 +428,15 @@ README and demo.
 
 Evidently jobs run asynchronously on a schedule. Prometheus metrics must avoid transaction IDs,
 account IDs, or any unbounded-cardinality labels.
+Prediction events store only the versioned serving feature contract and a random feedback UUID; they
+exclude request IDs, account/transaction identifiers, raw payloads, and label source identifiers.
+The approved feature set contains transaction amounts and pre-transaction balances and must therefore
+be treated as sensitive financial data in the local volume and report artifacts; production storage also
+requires encryption at rest and access controls.
+The scheduled report compares recent events with the frozen validation split, uses bounded deterministic
+samples, and segments reports by model and feature-contract version. Delayed performance and calibration
+are computed only after labels are joined. Retention defaults to 90 days; generated reports follow a
+separate artifact-retention policy.
 
 ## 14. Retraining and Promotion
 
@@ -419,11 +469,11 @@ promotion remains controlled unless a future governance decision explicitly chan
 | Local orchestration | Docker Compose | Make primary runtime |
 | Kubernetes demo | kind | Keep as optional production-like profile |
 | Metrics/dashboard | Prometheus + Grafana | Add in observability sprint |
-| ML monitoring | Evidently batch jobs | Add after prediction logging exists |
+| ML monitoring | Evidently 0.7 batch reports + local SQLite event/label store | Keep for local profile; replace SQLite with shared durable storage before multi-replica production |
 | Metadata database | SQLite local, PostgreSQL production-like | Profile-dependent |
 | Artifact storage | Filesystem local, MinIO production-like | Profile-dependent |
 | CI | GitHub Actions | Expand quality gates |
-| Scheduling | GitHub Actions schedule or Kubernetes CronJob | Prefer over Airflow for current scope |
+| Scheduling | OS scheduler locally; Kubernetes CronJob for cluster deployments | Prefer over Airflow/GitHub Actions for the current data-local job |
 
 ### Intentionally deferred
 
@@ -441,7 +491,7 @@ Use separately installable dependency groups, for example:
 ```text
 core        shared schemas/contracts
 training    PySpark, pandas, sklearn, XGBoost
-tracking    MLflow and database driver
+    tracking    MLflow, PostgreSQL driver, and S3-compatible object-store client
 serving     FastAPI, Uvicorn, model runtime
 monitoring  Evidently and reporting dependencies
 dev         pytest, Ruff, pre-commit, load-test tooling

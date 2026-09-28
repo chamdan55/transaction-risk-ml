@@ -28,6 +28,7 @@ serving = [
     "pandas>=2.2,<3.0",
     "scikit-learn>=1.2,<2.0",
     "xgboost>=2.0,<3.0",
+    "prometheus-client>=0.23,<1.0",
 ]
 training = [
     "joblib>=1.4,<2.0",
@@ -39,6 +40,15 @@ training = [
 ]
 tracking = [
     "mlflow>=3.0,<4.0",
+    "boto3>=1.35,<2.0",
+    "psycopg2-binary>=2.9.9,<3.0",
+]
+monitoring = [
+    "evidently>=0.7.21,<0.8",
+    "joblib>=1.4,<2.0",
+    "pandas>=2.2,<3.0",
+    "pyarrow>=18,<23",
+    "scikit-learn>=1.2,<2.0",
 ]
 data = [
     "pandas>=2.2,<3.0",

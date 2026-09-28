@@ -9,6 +9,8 @@ Folder ini berisi konfigurasi version-controlled untuk pipeline data dan model.
 - `model.yaml` — dataset input training, feature contract, target, excluded columns, strategi
   imbalance/sampling, model parameters, business-cost/recall/threshold policy, calibration bins,
   dan output artifacts/model card.
+- `retraining.yaml` — provisional absolute quality gates, same-test-set deltas against the active
+  production model, and minimum evaluation sample sizes for the controlled retraining entry point.
 
 ## Usage
 
@@ -19,3 +21,5 @@ python -m pipelines.train_models --config configs/model.yaml
 ```
 
 Jangan menaruh credential, absolute path lokal, atau parameter rahasia di folder ini. Gunakan path relatif terhadap repository agar pipeline tetap reproducible.
+Nilai di `retraining.yaml` adalah gate demo PaySim dan harus ditinjau oleh pemilik risiko sebelum
+dipakai untuk keputusan production.

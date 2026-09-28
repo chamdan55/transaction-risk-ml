@@ -4,7 +4,7 @@
 **Priority:** P1
 **Sprint:** 6
 **Dependencies:** TRM-007, TRM-011
-**Status:** Blocked
+**Status:** Completed — owner pytest and Podman monitoring report validated
 
 ## Problem
 
@@ -41,8 +41,40 @@ event and a reliable way to join later ground-truth labels.
 ```powershell
 pytest tests/contract/test_prediction_events.py
 pytest tests/integration/test_feedback_pipeline.py tests/integration/test_drift_job.py
-python -m pipelines.run_monitoring
+python -m pip install -e ".[monitoring]" -c requirements/constraints-py312.txt
+python -m pipelines.run_monitoring --reference-data data/processed/features/validation
+# If API is running in Podman Compose, run the report in the shared event volume:
+make monitoring-report-compose
 ```
+
+## Implementation Note
+
+Successful API predictions now return a random `feedback_id` and enqueue an exact, versioned
+`prediction-event-v1` feature snapshot to a bounded background writer. The writer persists into SQLite
+with retries, deduplication, retention, and a bounded shutdown drain; queue overflow and process-crash
+loss are documented and instrumented. `POST /v1/feedback/labels` accepts strict `delayed-label-v1`
+records, permits delivery before the event writer flushes, accepts same-label retries, and rejects a
+conflicting final label. Neither contract accepts account IDs or unrestricted payloads.
+
+`pipelines.run_monitoring` is a separate scheduled process. It compares sampled recent features and
+prediction scores with the validation split using Evidently, segments artifacts by model and contract,
+and computes calibration/performance when delayed labels exist. The JSON summary includes unmatched labels
+and predictions past the label grace period. Local output is written under `artifacts/monitoring/reports/`;
+no retraining or model promotion is triggered. The container profile uses the same persistent SQLite
+volume as the API; production multi-replica durability remains outside this local SQLite design.
+
+Implementation and contract/integration tests are in place, including a concurrency case for idempotent
+same-label retries and a regression check for Evidently's `DataDriftPreset(columns=...)` API. On
+2026-09-24, the report job completed against the existing Compose event volume with two current events
+and two joined labels, producing HTML, JSON, and `latest-summary.json` with `drift_status=generated`.
+The first run exposed an Evidently 0.7.21 API mismatch: `DataDriftPreset` accepts `columns`, not
+`column`. After the fix, the monitoring image rebuilt and the standard Compose report job completed
+with exit code 0. The owner reported a green pytest run and reran `make monitoring-report-compose`
+successfully on 2026-09-24; its report recorded two events, two joined labels, and
+`drift_status=generated`. This validates the pipeline, while drift and performance values based on two
+demo predictions are not statistically meaningful. Configure a recurring scheduler and collect
+representative, genuinely labeled data when operating beyond the local demo. The report requires at
+least two current events for an active model/contract segment before drift comparison is generated.
 
 ## Prompt for an AI Agent
 

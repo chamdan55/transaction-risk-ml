@@ -4,7 +4,7 @@
 **Priority:** P1
 **Sprint:** 6
 **Dependencies:** TRM-008, TRM-009
-**Status:** Blocked
+**Status:** Completed — owner confirmed pytest, dashboard panels, and alert recovery
 
 ## Problem
 
@@ -39,6 +39,18 @@ or model-loading failures.
 pytest tests/unit/test_metrics.py tests/integration/test_observability.py
 docker compose --profile monitoring up
 ```
+
+## Implementation Note
+
+The API now exposes bounded Prometheus metrics at `/metrics`, provides optional JSON logs with correlation
+IDs, and includes local Prometheus/Grafana provisioning plus alert rules and runbooks under `monitoring/`.
+The Podman monitoring profile was started locally on 2026-09-23: API readiness and `/metrics`, Prometheus
+readiness, Grafana health, and Prometheus target health returned successfully. The owner reported a green
+pytest run and supplied screenshots showing the Grafana dashboard and the no-ready-instance alert firing.
+The dashboard layout and error-rate/model-version panels were corrected after the first review. The owner
+reported a green pytest run, shared screenshots showing request rate, p95 latency, 5xx error rate, readiness,
+and the active model name/version, and confirmed the no-ready-instance alert fired during simulation. A
+subsequent read-only check returned HTTP 200 from `/health/ready` and showed that alert inactive after recovery.
 
 ## Prompt for an AI Agent
 

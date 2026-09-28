@@ -83,16 +83,24 @@ class ModelProvider:
     def predict_score(self, feature_frame: pd.DataFrame) -> float:
         """Score one already-prepared frame; loading never occurs on this path."""
 
+        scores = self.predict_scores(feature_frame)
+        if not scores:
+            raise ModelProviderError("Model returned no prediction rows")
+        return scores[0]
+
+    def predict_scores(self, feature_frame: pd.DataFrame) -> list[float]:
+        """Score a bounded feature batch for offline monitoring."""
+
         if not self.is_ready:
             raise ModelProviderError("Model is not ready")
-        probabilities = self._model.predict_proba(feature_frame)
         try:
-            score = float(probabilities[0][1])
-        except (IndexError, KeyError, TypeError) as exc:
+            probabilities = self._model.predict_proba(feature_frame)
+            scores = [float(probability[1]) for probability in probabilities]
+        except (IndexError, KeyError, TypeError, ValueError) as exc:
             raise ModelProviderError("Model returned an invalid probability shape") from exc
-        if not isfinite(score) or not 0 <= score <= 1:
+        if any(not isfinite(score) or not 0 <= score <= 1 for score in scores):
             raise ModelProviderError("Model returned a probability outside [0, 1]")
-        return score
+        return scores
 
     def _load_local(self) -> tuple[Any, ModelMetadata]:
         artifact_path = self._settings.model_artifact_path
@@ -109,6 +117,15 @@ class ModelProvider:
         candidate = _mapping(report, "candidate")
         config = _mapping(report, "config")
         lineage = _mapping(report, "lineage")
+        release = report.get("release", {})
+        if release and not isinstance(release, dict):
+            raise ModelProviderError("Local release metadata must be an object")
+        if release and release.get("model_name") != candidate.get("model_name"):
+            raise ModelProviderError(
+                "Local release model name does not match its evaluation report"
+            )
+        if release and not isinstance(release.get("model_version"), str):
+            raise ModelProviderError("Local release model version is missing or invalid")
         expected_artifact_name = f"{candidate['model_name']}.joblib"
         if artifact_path.name != expected_artifact_name:
             raise ModelProviderError(
@@ -116,8 +133,11 @@ class ModelProvider:
                 f"expected {expected_artifact_name}, got {artifact_path.name}"
             )
         return model, _metadata_from_values(
-            model_name=candidate["model_name"],
-            model_version=f"local-{_required_string(lineage, 'manifest_id')[:12]}",
+            model_name=release.get("model_name", candidate["model_name"]),
+            model_version=release.get(
+                "model_version",
+                f"local-{_required_string(lineage, 'manifest_id')[:12]}",
+            ),
             model_source="local",
             threshold=candidate["threshold"],
             threshold_policy=candidate["threshold_selection_strategy"],

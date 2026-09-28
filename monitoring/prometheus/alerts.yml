@@ -1,0 +1,38 @@
+groups:
+  - name: transaction-risk-serving
+    rules:
+      - alert: TransactionRiskApiHighErrorRate
+        expr: |
+          sum(rate(trm_http_requests_total{path="/v1/predictions",status=~"5.."}[5m]))
+          / clamp_min(sum(rate(trm_http_requests_total{path="/v1/predictions"}[5m])), 1e-9) > 0.02
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Transaction-risk prediction error rate exceeds 2%
+          runbook: Check /health/ready, trm_model_load_total, model bundle and API logs; roll back the image/model if the issue followed a deployment.
+      - alert: TransactionRiskApiHighLatency
+        expr: |
+          histogram_quantile(0.95, sum(rate(trm_http_request_duration_seconds_bucket{path="/v1/predictions"}[5m])) by (le)) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Transaction-risk prediction p95 latency exceeds 500 ms
+          runbook: Check in-flight requests, CPU/memory saturation, the load baseline, then lower traffic or scale only with measured evidence.
+      - alert: TransactionRiskApiNoReadyInstance
+        expr: up{job="transaction-risk-api"} == 0 or max(trm_model_ready) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: No scrapeable ready transaction-risk API instance
+          runbook: Check container/pod state and /health/ready; inspect model artifact/report paths and restore the last known-good image/model.
+      - alert: TransactionRiskModelLoadFailure
+        expr: increase(trm_model_load_total{outcome="failure"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: Transaction-risk model loading failed
+          runbook: Verify trusted model artifact/report integrity and compatible runtime dependencies; roll back rather than bypassing readiness.

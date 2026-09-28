@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transaction-risk-api
+  namespace: transaction-risk
+  labels:
+    app.kubernetes.io/name: transaction-risk-api
+    app.kubernetes.io/part-of: transaction-risk
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: transaction-risk-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: transaction-risk-api
+        app.kubernetes.io/part-of: transaction-risk
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: model-bundle
+          image: transaction-risk-model-bundle:local
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cp /bundle/*.joblib /bundle/evaluation_report.json /models/"]
+          volumeMounts:
+            - name: model-artifacts
+              mountPath: /models
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+      containers:
+        - name: api
+          image: transaction-risk-serving:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: transaction-risk-api-config
+            - secretRef:
+                name: transaction-risk-api-secrets
+                optional: true
+          resources:
+            # Provisional until the committed baseline report is collected.
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          volumeMounts:
+            - name: model-artifacts
+              mountPath: /models
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+      volumes:
+        - name: model-artifacts
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

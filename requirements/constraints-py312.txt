@@ -2,10 +2,14 @@
 # Refresh this file deliberately when upgrading the runtime; CI still resolves and tests the
 # transitive dependency graph from pyproject.toml.
 fastapi==0.141.1
+evidently==0.7.21
 httpx==0.28.1
 joblib==1.6.0
 mlflow==3.16.1
+boto3==1.43.28
+psycopg2-binary==2.9.13
 pandas==2.3.3
+prometheus-client==0.23.1
 pandera==0.33.1
 pyarrow==22.0.0
 pydantic==2.13.5

@@ -1,0 +1,116 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: transaction-risk-retraining
+  namespace: transaction-risk
+  labels:
+    app.kubernetes.io/name: transaction-risk-retraining
+    app.kubernetes.io/part-of: transaction-risk
+spec:
+  schedule: "0 3 * * 1"
+  timeZone: Etc/UTC
+  suspend: true
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 900
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 4
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 21600
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: transaction-risk-retraining
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: retrain
+              image: transaction-risk-training:local
+              imagePullPolicy: IfNotPresent
+              command: ["python", "-m", "pipelines.retrain_model"]
+              args:
+                - --config
+                - configs/model.yaml
+                - --policy
+                - configs/retraining.yaml
+                - --approved-manifest
+                - /approved/approved-manifest.json
+                - --tracking-config
+                - configs/tracking-compose.yaml
+                - --tracking-uri
+                - $(MLFLOW_TRACKING_URI)
+              env:
+                - name: MLFLOW_TRACKING_URI
+                  valueFrom:
+                    secretKeyRef:
+                      name: transaction-risk-retraining-secrets
+                      key: tracking-uri
+                - name: MLFLOW_TRACKING_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: transaction-risk-retraining-secrets
+                      key: tracking-username
+                      optional: true
+                - name: MLFLOW_TRACKING_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: transaction-risk-retraining-secrets
+                      key: tracking-password
+                      optional: true
+                - name: MLFLOW_TRACKING_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: transaction-risk-retraining-secrets
+                      key: tracking-token
+                      optional: true
+              resources:
+                # Provisional for local PaySim-scale runs; measure before production scheduling.
+                requests:
+                  cpu: "1"
+                  memory: 4Gi
+                limits:
+                  cpu: "4"
+                  memory: 12Gi
+              volumeMounts:
+                - name: approved-manifest
+                  mountPath: /approved
+                  readOnly: true
+                - name: training-data
+                  mountPath: /workspace/data/processed
+                  readOnly: true
+                - name: run-artifacts
+                  mountPath: /workspace/artifacts
+                - name: temporary
+                  mountPath: /tmp
+                - name: spark-warehouse
+                  mountPath: /workspace/spark-warehouse
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                runAsUser: 10001
+                runAsGroup: 10001
+          volumes:
+            - name: approved-manifest
+              configMap:
+                name: transaction-risk-approved-dataset-manifest
+            - name: training-data
+              persistentVolumeClaim:
+                claimName: transaction-risk-datasets
+            - name: run-artifacts
+              emptyDir:
+                sizeLimit: 4Gi
+            - name: temporary
+              emptyDir:
+                sizeLimit: 4Gi
+            - name: spark-warehouse
+              emptyDir:
+                sizeLimit: 2Gi

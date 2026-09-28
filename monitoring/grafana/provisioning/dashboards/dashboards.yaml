@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: transaction-risk
+    orgId: 1
+    folder: Transaction Risk
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /etc/grafana/provisioning/dashboards

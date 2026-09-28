@@ -30,10 +30,11 @@ Aturan umum untuk semua agent:
 | [TRM-007](TRM-007-fastapi-serving.md) | P0 | 4 | Build shared inference contract and FastAPI serving | TRM-002, TRM-003, TRM-006, TRM-014, TRM-015 | Implemented — owner validation passed |
 | [TRM-008](TRM-008-api-security-reliability.md) | P1 | 4 | Add API security, reliability, and contract tests | TRM-007 | Implemented — owner validation passed |
 | [TRM-009](TRM-009-container-compose.md) | P1 | 5 | Build minimal images and Podman Compose runtime | TRM-004, TRM-008 | Implemented — owner Podman validation pending |
-| [TRM-010](TRM-010-load-test-kind.md) | P2 | 5 | Establish load baseline and kind deployment | TRM-009 | Blocked |
-| [TRM-011](TRM-011-runtime-observability.md) | P1 | 6 | Add runtime metrics, dashboards, and alerts | TRM-008, TRM-009 | Blocked |
-| [TRM-012](TRM-012-ml-observability.md) | P1 | 6 | Add prediction events, label feedback, and drift jobs | TRM-007, TRM-011 | Blocked |
-| [TRM-013](TRM-013-controlled-retraining.md) | P1 | 7 | Implement controlled retraining, promotion, and rollback | TRM-006, TRM-012 | Blocked |
+| [TRM-010](TRM-010-load-test-kind.md) | P2 | 5 | Establish load baseline and kind deployment | TRM-009 | Implemented — owner validation pending |
+| [TRM-011](TRM-011-runtime-observability.md) | P1 | 6 | Add runtime metrics, dashboards, and alerts | TRM-008, TRM-009 | Completed — owner validation passed |
+| [TRM-012](TRM-012-ml-observability.md) | P1 | 6 | Add prediction events, label feedback, and drift jobs | TRM-007, TRM-011 | Completed — owner pytest and report job passed |
+| [TRM-016](TRM-016-containerized-mlflow-tracking.md) | P1 | 6.5 | Connect training and registry to containerized MLflow | TRM-003, TRM-009, TRM-012 | Startup, Pytest, artifact/registry smoke passed — remote training and persistence pending |
+| [TRM-013](TRM-013-controlled-retraining.md) | P1 | 7 | Implement controlled retraining, promotion, and rollback | TRM-006, TRM-012, TRM-016 | Implemented — owner Pytest and containerized runtime scenarios pending |
 
 ## Recommended Execution Waves
 
@@ -48,7 +49,8 @@ Wave 5: TRM-008
 Wave 6: TRM-009
 Wave 7: TRM-010, TRM-011
 Wave 8: TRM-012
-Wave 9: TRM-013
+Wave 9: TRM-016
+Wave 10: TRM-013
 ```
 
 TRM-010 is optional for the minimum Docker Compose demo, but required for the Kubernetes portfolio

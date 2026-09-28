@@ -13,12 +13,19 @@ def test_container_definition_separates_serving_and_training_dependencies() -> N
     assert "pyspark" not in dockerfile.split("FROM runtime-base AS training")[0]
 
 
-def test_compose_keeps_stateful_services_private_and_api_model_is_a_named_volume() -> None:
+def test_compose_keeps_stateful_services_private_and_uses_a_bundled_model() -> None:
     compose = (REPOSITORY_ROOT / "compose.yaml").read_text(encoding="utf-8")
+    dockerfile = (REPOSITORY_ROOT / "Dockerfile").read_text(encoding="utf-8")
 
     assert "127.0.0.1:${API_PORT:-8000}:8000" in compose
-    assert "model-artifacts:/models:ro" in compose
+    assert "target: serving-with-model" in compose
+    assert "model-seed:" not in compose
+    assert "model-artifacts:/models" not in compose
+    assert "FROM serving AS serving-with-model" in dockerfile
+    assert "COPY --from=model-bundle --chown=app:app /bundle/ /models/" in dockerfile
     assert "postgres-data:/var/lib/postgresql/data" in compose
+    assert "--backend-store-uri postgresql+psycopg2://" in compose
+    assert "psycopg2-binary" in (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert "minio-data:/data" in compose
     assert "internal: true" in compose
     assert "postgres:\n    image" in compose

@@ -4,7 +4,7 @@
 **Priority:** P2
 **Sprint:** 5
 **Dependencies:** TRM-009
-**Status:** Blocked
+**Status:** Implemented — owner baseline and kind validation pending
 
 ## Problem
 
@@ -43,6 +43,13 @@ kubectl apply -f deployment/kubernetes
 kubectl rollout status deployment/transaction-risk-api
 kubectl rollout undo deployment/transaction-risk-api
 ```
+
+## Implementation Note
+
+The repository now contains a k6 valid/invalid-mix scenario, a baseline-report template, and minimal
+kind manifests in `deployment/kubernetes/`. Resource values are deliberately marked provisional until the
+owner records baseline evidence. No HPA is included because a usable metric signal and saturation point
+have not yet been demonstrated.
 
 ## Prompt for an AI Agent
 

@@ -1,3 +1,4 @@
+import os
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -23,8 +24,8 @@ class FakeMlflow:
     def get_experiment_by_name(self, _name):
         return None
 
-    def create_experiment(self, name, artifact_location):
-        self.created_experiment = (name, artifact_location)
+    def create_experiment(self, name, **kwargs):
+        self.created_experiment = (name, kwargs)
         return "experiment-1"
 
     def log_params(self, params):
@@ -77,7 +78,7 @@ def test_tracking_client_configures_experiment_and_starts_run():
     assert fake_mlflow.tracking_uri == "mlruns"
     assert fake_mlflow.created_experiment == (
         "transaction-risk-classification",
-        "mlartifacts",
+        {"artifact_location": "mlartifacts"},
     )
 
     with client.start_run(run_name="baseline") as run:
@@ -87,6 +88,58 @@ def test_tracking_client_configures_experiment_and_starts_run():
         "run_name": "baseline",
         "nested": False,
     }
+
+
+def test_tracking_client_leaves_remote_artifact_location_to_server():
+    fake_mlflow = FakeMlflow()
+    client = MlflowTrackingClient(
+        TrackingConfig(
+            uri="http://127.0.0.1:5000",
+            experiment_name="remote-experiment",
+            registered_model_name="risk-model",
+        ),
+        _mlflow=fake_mlflow,
+    )
+
+    assert client.configure() == "experiment-1"
+    assert fake_mlflow.created_experiment == ("remote-experiment", {})
+
+
+def test_tracking_client_forces_private_artifact_transfers_through_server(monkeypatch):
+    monkeypatch.setenv("MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD", "true")
+    monkeypatch.setenv("MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD", "true")
+    client = MlflowTrackingClient(
+        TrackingConfig(
+            uri="http://127.0.0.1:5000",
+            experiment_name="remote-experiment",
+            registered_model_name="risk-model",
+            force_proxy_artifact_transfers=True,
+        ),
+        _mlflow=FakeMlflow(),
+    )
+
+    client.configure()
+
+    assert os.environ["MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD"] == "false"
+    assert os.environ["MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD"] == "false"
+
+
+def test_tracking_client_wraps_remote_server_unavailable_error():
+    class UnavailableMlflow(FakeMlflow):
+        def get_experiment_by_name(self, _name):
+            raise ConnectionError("connection refused")
+
+    client = MlflowTrackingClient(
+        TrackingConfig(
+            uri="http://127.0.0.1:5055",
+            experiment_name="remote-experiment",
+            registered_model_name="risk-model",
+        ),
+        _mlflow=UnavailableMlflow(),
+    )
+
+    with pytest.raises(TrackingClientError, match="Unable to configure MLflow experiment"):
+        client.configure()
 
 
 def test_tracking_client_infers_signature_from_feature_only_input():

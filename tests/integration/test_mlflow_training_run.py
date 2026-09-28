@@ -42,7 +42,12 @@ def test_registered_model_is_loadable_and_can_be_explicitly_promoted(tmp_path):
             model,
             model_name="logistic_regression",
             registered_model_name=config.registered_model_name,
-            version_tags={"candidate_status": "candidate", "test.pr_auc": "1.0"},
+            version_tags={
+                "candidate_status": "candidate",
+                "signature_validation": "passed",
+                "serving_input_validation": "passed",
+                "test.pr_auc": "1.0",
+            },
         )
         loaded = load_logged_model(client, reference)
 

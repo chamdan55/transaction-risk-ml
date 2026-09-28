@@ -1,0 +1,25 @@
+# Demonstration thresholds for the PaySim training dataset. Risk/business owners must approve
+# replacements using representative labeled data before using this policy for a real decision.
+quality_gates:
+  absolute:
+    minimum_validation_pr_auc: 0.50
+    minimum_validation_precision: 0.50
+    minimum_validation_recall: 0.80
+    minimum_test_pr_auc: 0.50
+    minimum_test_precision: 0.50
+    minimum_test_recall: 0.80
+    # Normalize by evaluated rows so the gate does not depend on test-set size.
+    maximum_test_expected_cost_per_transaction: 0.10
+    maximum_test_brier_score: 0.10
+    maximum_test_calibration_error: 0.10
+    maximum_test_alert_rate: 0.05
+  minimum_test_rows: 10000
+  minimum_test_positives: 100
+  comparison:
+    minimum_pr_auc_delta: -0.01
+    minimum_precision_delta: -0.05
+    minimum_recall_delta: -0.02
+    maximum_expected_cost_per_transaction_increase: 0.01
+    maximum_brier_score_increase: 0.01
+    maximum_calibration_error_increase: 0.02
+    maximum_alert_rate_increase: 0.02

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from ml.tracking.client import MlflowTrackingClient, TrackingClientError
@@ -26,6 +27,32 @@ class LoggedModel:
             "registered_model_name": self.registered_model_name,
             "registered_model_version": self.registered_model_version,
         }
+
+
+@dataclass(frozen=True)
+class PromotionRecord:
+    """Auditable alias transition, including the version that can be restored."""
+
+    registered_model_name: str
+    alias: str
+    previous_version: str | None
+    new_version: str
+    approved_by: str
+    reason: str
+    timestamp_utc: str
+
+
+@dataclass(frozen=True)
+class RollbackRecord:
+    """Auditable restoration of a previously approved model version."""
+
+    registered_model_name: str
+    alias: str
+    source_version: str
+    restored_version: str
+    approved_by: str
+    reason: str
+    timestamp_utc: str
 
 
 def log_and_register_model(
@@ -91,7 +118,7 @@ def promote_registered_model(
     stage: str,
     approved_by: str,
     reason: str,
-) -> None:
+) -> PromotionRecord:
     """Promote an already registered candidate after explicit human approval.
 
     Promotion deliberately is not part of training.  Calling code must supply
@@ -105,17 +132,151 @@ def promote_registered_model(
         raise TrackingClientError("approved_by and reason must not be empty")
     if reference.registered_model_name is None or reference.registered_model_version is None:
         raise TrackingClientError("A registered model version is required for promotion")
-    client.set_model_alias(
+    if reference.registered_model_name != client.config.registered_model_name:
+        raise TrackingClientError(
+            "Promotion model name does not match the configured registry model"
+        )
+    model_version = client.get_model_version(version=reference.registered_model_version)
+    version_tags = model_version.tags
+    if getattr(model_version, "status", "READY") != "READY":
+        raise TrackingClientError("Only a READY MLflow model version can be promoted")
+    if version_tags.get("candidate_status") not in {"candidate", "staging", "production"}:
+        raise TrackingClientError("Rejected or unreviewable model versions cannot be promoted")
+    if version_tags.get("retraining.quality_gate") == "rejected":
+        raise TrackingClientError("A model that failed retraining quality gates cannot be promoted")
+    if version_tags.get("signature_validation") != "passed":
+        raise TrackingClientError("Model version has not passed signature validation")
+    if version_tags.get("serving_input_validation") != "passed":
+        raise TrackingClientError("Model version has not passed serving-input validation")
+    previous_version = client.get_model_alias_version(alias=stage)
+    if previous_version == reference.registered_model_version:
+        raise TrackingClientError(
+            f"Model version {reference.registered_model_version} is already assigned to alias {stage!r}"
+        )
+    timestamp = datetime.now(UTC).isoformat()
+    try:
+        client.set_model_alias(
+            registered_model_name=reference.registered_model_name,
+            alias=stage,
+            version=reference.registered_model_version,
+        )
+        client.set_model_version_tags(
+            registered_model_name=reference.registered_model_name,
+            version=reference.registered_model_version,
+            tags={
+                "candidate_status": stage,
+                "promotion.alias": stage,
+                "promotion.approved_by": approved_by,
+                "promotion.reason": reason,
+                "promotion.previous_version": previous_version or "none",
+                "promotion.new_version": reference.registered_model_version,
+                "promotion.timestamp_utc": timestamp,
+                f"promotion.previous_version.{stage}": previous_version or "none",
+                f"promotion.new_version.{stage}": reference.registered_model_version,
+                f"promotion.timestamp_utc.{stage}": timestamp,
+                f"promotion.approved_by.{stage}": approved_by,
+                f"promotion.reason.{stage}": reason,
+            },
+        )
+    except Exception:
+        try:
+            if previous_version is None:
+                client.delete_model_alias(alias=stage)
+            else:
+                client.set_model_alias(
+                    registered_model_name=reference.registered_model_name,
+                    alias=stage,
+                    version=previous_version,
+                )
+        except Exception as rollback_error:
+            raise TrackingClientError(
+                "Promotion metadata failed and the model alias could not be restored"
+            ) from rollback_error
+        raise
+    return PromotionRecord(
         registered_model_name=reference.registered_model_name,
         alias=stage,
-        version=reference.registered_model_version,
+        previous_version=previous_version,
+        new_version=reference.registered_model_version,
+        approved_by=approved_by,
+        reason=reason,
+        timestamp_utc=timestamp,
     )
-    client.set_model_version_tags(
-        registered_model_name=reference.registered_model_name,
-        version=reference.registered_model_version,
-        tags={
-            "candidate_status": stage,
-            "promotion.approved_by": approved_by,
-            "promotion.reason": reason,
-        },
+
+
+def rollback_registered_model(
+    client: MlflowTrackingClient,
+    *,
+    stage: str,
+    approved_by: str,
+    reason: str,
+    expected_current_version: str | None = None,
+) -> RollbackRecord:
+    """Restore the version recorded by the latest successful promotion audit."""
+
+    if stage not in {"staging", "production"}:
+        raise TrackingClientError("stage must be either 'staging' or 'production'")
+    if not approved_by.strip() or not reason.strip():
+        raise TrackingClientError("approved_by and reason must not be empty")
+    current_version = client.get_model_alias_version(alias=stage)
+    if current_version is None:
+        raise TrackingClientError(f"No MLflow model is currently assigned to alias {stage!r}")
+    if expected_current_version is not None and current_version != expected_current_version:
+        raise TrackingClientError(
+            f"Alias {stage!r} points to version {current_version}, expected "
+            f"{expected_current_version}; refusing to roll back a concurrent promotion"
+        )
+    current_metadata = client.get_model_version(version=current_version)
+    previous_version = current_metadata.tags.get(
+        f"promotion.previous_version.{stage}",
+        current_metadata.tags.get("promotion.previous_version"),
+    )
+    if not previous_version or previous_version == "none":
+        raise TrackingClientError(
+            f"Model version {current_version} has no previously promoted {stage} version"
+        )
+    previous_metadata = client.get_model_version(version=previous_version)
+    if getattr(previous_metadata, "status", "READY") != "READY":
+        raise TrackingClientError(
+            f"Cannot restore model version {previous_version}: registry status is not READY"
+        )
+    timestamp = datetime.now(UTC).isoformat()
+    try:
+        client.set_model_alias(
+            registered_model_name=client.config.registered_model_name,
+            alias=stage,
+            version=previous_version,
+        )
+        client.set_model_version_tags(
+            registered_model_name=client.config.registered_model_name,
+            version=current_version,
+            tags={
+                "rollback.alias": stage,
+                "rollback.from_version": current_version,
+                "rollback.to_version": previous_version,
+                "rollback.approved_by": approved_by,
+                "rollback.reason": reason,
+                "rollback.timestamp_utc": timestamp,
+            },
+        )
+    except Exception:
+        try:
+            client.set_model_alias(
+                registered_model_name=client.config.registered_model_name,
+                alias=stage,
+                version=current_version,
+            )
+        except Exception as rollback_error:
+            raise TrackingClientError(
+                "Rollback audit failed and the model alias could not be restored"
+            ) from rollback_error
+        raise
+    return RollbackRecord(
+        registered_model_name=client.config.registered_model_name,
+        alias=stage,
+        source_version=current_version,
+        restored_version=previous_version,
+        approved_by=approved_by,
+        reason=reason,
+        timestamp_utc=timestamp,
     )

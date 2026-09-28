@@ -44,8 +44,10 @@ def test_prediction_contract_returns_decision_and_model_metadata() -> None:
         response = client.post("/v1/predictions", json=_payload())
 
     assert response.status_code == 200
-    assert response.json() == {
+    result = response.json()
+    assert result == {
         "request_id": "3b241101-e2bb-4255-8caf-4136c566a962",
+        "feedback_id": result["feedback_id"],
         "risk_score": 0.75,
         "decision": "review",
         "model_name": "random_forest",
@@ -55,6 +57,7 @@ def test_prediction_contract_returns_decision_and_model_metadata() -> None:
         "threshold_policy": "business_cost",
         "feature_contract_version": "pre-transaction-v1",
     }
+    assert len(result["feedback_id"]) == 36
 
 
 def test_liveness_stays_healthy_while_a_missing_model_is_unready(tmp_path) -> None:

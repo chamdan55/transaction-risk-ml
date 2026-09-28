@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from types import ModuleType
 from typing import Any
 
-from ml.tracking.config import TrackingConfig
+from ml.tracking.config import TrackingConfig, configure_artifact_transfers
 
 
 class TrackingClientError(RuntimeError):
@@ -25,14 +25,18 @@ class MlflowTrackingClient:
     def configure(self) -> str:
         """Configure tracking URI and return the experiment ID."""
 
+        configure_artifact_transfers(self.config)
         mlflow = self._load_mlflow()
         try:
             mlflow.set_tracking_uri(self.config.uri)
             experiment = mlflow.get_experiment_by_name(self.config.experiment_name)
             if experiment is None:
+                create_kwargs = {}
+                if self.config.artifact_location is not None:
+                    create_kwargs["artifact_location"] = self.config.artifact_location
                 self._experiment_id = mlflow.create_experiment(
                     self.config.experiment_name,
-                    artifact_location=self.config.artifact_location,
+                    **create_kwargs,
                 )
             else:
                 self._experiment_id = str(experiment.experiment_id)
@@ -196,6 +200,70 @@ class MlflowTrackingClient:
             ).set_registered_model_alias(registered_model_name, alias, version)
         except Exception as exc:
             raise TrackingClientError("Unable to set MLflow model alias") from exc
+
+    def get_model_version_by_alias(self, *, alias: str) -> Any:
+        """Return model-version metadata currently selected by an alias."""
+
+        if not alias.strip():
+            raise TrackingClientError("model alias must not be empty")
+        try:
+            return (
+                self._load_mlflow()
+                .tracking.MlflowClient(tracking_uri=self.config.uri)
+                .get_model_version_by_alias(self.config.registered_model_name, alias)
+            )
+        except Exception as exc:
+            raise TrackingClientError(
+                f"Unable to resolve MLflow model alias: {self.config.registered_model_name}@{alias}"
+            ) from exc
+
+    def get_model_alias_version(self, *, alias: str) -> str | None:
+        """Return the version assigned to an alias, or ``None`` when it is unset."""
+
+        if not alias.strip():
+            raise TrackingClientError("model alias must not be empty")
+        try:
+            registered_model = (
+                self._load_mlflow()
+                .tracking.MlflowClient(tracking_uri=self.config.uri)
+                .get_registered_model(self.config.registered_model_name)
+            )
+            version = registered_model.aliases.get(alias)
+            return str(version) if version is not None else None
+        except Exception as exc:
+            raise TrackingClientError(
+                f"Unable to read MLflow model aliases: {self.config.registered_model_name}"
+            ) from exc
+
+    def get_model_version(self, *, version: str) -> Any:
+        """Return metadata for one registered model version."""
+
+        if not version.strip():
+            raise TrackingClientError("model version must not be empty")
+        try:
+            return (
+                self._load_mlflow()
+                .tracking.MlflowClient(tracking_uri=self.config.uri)
+                .get_model_version(self.config.registered_model_name, version)
+            )
+        except Exception as exc:
+            raise TrackingClientError(
+                f"Unable to read MLflow model version: {self.config.registered_model_name}@{version}"
+            ) from exc
+
+    def delete_model_alias(self, *, alias: str) -> None:
+        """Remove a registry alias when rolling back a first-time promotion."""
+
+        if not alias.strip():
+            raise TrackingClientError("model alias must not be empty")
+        try:
+            self._load_mlflow().tracking.MlflowClient(
+                tracking_uri=self.config.uri
+            ).delete_registered_model_alias(self.config.registered_model_name, alias)
+        except Exception as exc:
+            raise TrackingClientError(
+                f"Unable to delete MLflow model alias: {self.config.registered_model_name}@{alias}"
+            ) from exc
 
     def _load_mlflow(self) -> ModuleType:
         if self._mlflow is None:

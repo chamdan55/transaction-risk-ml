@@ -20,6 +20,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--approved-by", required=True, help="Reviewer approving the quality gate")
     parser.add_argument("--reason", required=True, help="Quality-gate decision rationale")
     parser.add_argument("--tracking-config", default="configs/tracking.yaml")
+    parser.add_argument(
+        "--tracking-uri",
+        default=None,
+        help="Override the tracking URI from the selected config for non-default host ports",
+    )
     return parser.parse_args()
 
 
@@ -32,7 +37,10 @@ def main() -> None:
         args.stage,
         args.approved_by,
     )
-    tracking_config = load_tracking_config(args.tracking_config)
+    tracking_config = load_tracking_config(
+        args.tracking_config,
+        tracking_uri=args.tracking_uri,
+    )
     LOGGER.info(
         "Configuring MLflow registry: tracking_uri=%s, registered_model=%s",
         tracking_config.uri,
@@ -47,7 +55,7 @@ def main() -> None:
             args.version,
             args.stage,
         )
-        promote_registered_model(
+        promotion = promote_registered_model(
             client,
             LoggedModel(
                 model_name="production-candidate",
@@ -69,10 +77,14 @@ def main() -> None:
         )
         raise
     LOGGER.info(
-        "Model promotion completed: model=%s, version=%s, stage=%s",
+        "Model promotion completed: model=%s, previous_version=%s, version=%s, stage=%s, "
+        "approved_by=%s, timestamp_utc=%s",
         tracking_config.registered_model_name,
-        args.version,
+        promotion.previous_version,
+        promotion.new_version,
         args.stage,
+        promotion.approved_by,
+        promotion.timestamp_utc,
     )
 
 

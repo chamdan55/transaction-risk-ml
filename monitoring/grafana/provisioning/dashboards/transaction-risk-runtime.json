@@ -1,0 +1,57 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Prediction request rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"expr": "sum(rate(trm_http_requests_total{path=\"/v1/predictions\"}[5m])) or (0 * max(trm_model_ready))", "refId": "A"}]
+    },
+    {
+      "id": 2,
+      "title": "Prediction p95 latency",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [{"expr": "histogram_quantile(0.95, sum(rate(trm_http_request_duration_seconds_bucket{path=\"/v1/predictions\"}[5m])) by (le))", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "title": "Prediction 5xx error rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0}},
+      "targets": [{"expr": "100 * ((sum(rate(trm_http_requests_total{path=\"/v1/predictions\",status=~\"5..\"}[5m])) or (0 * max(trm_model_ready))) / clamp_min((sum(rate(trm_http_requests_total{path=\"/v1/predictions\"}[5m])) or (0 * max(trm_model_ready))), 1e-9))", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "title": "Model readiness",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 4, "x": 12, "y": 8},
+      "targets": [{"expr": "max(trm_model_ready)", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "title": "Active model version",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+      "targets": [{"expr": "trm_model_info == 1", "format": "table", "instant": true, "refId": "A"}],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {"Time": true, "__name__": true, "Value": true, "model_source": true, "feature_contract_version": true},
+            "renameByName": {"model_name": "Model", "model_version": "Version"}
+          }
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["transaction-risk", "runtime"],
+  "title": "Transaction Risk Runtime",
+  "uid": "transaction-risk-runtime",
+  "version": 2
+}

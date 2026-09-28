@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, field_validator
+
+from ml.monitoring.contracts import DELAYED_LABEL_SCHEMA_VERSION
 
 
 class TransactionType(StrEnum):
@@ -40,6 +43,7 @@ class PredictionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request_id: UUID
+    feedback_id: UUID
     risk_score: float = Field(ge=0, le=1)
     decision: str
     model_name: str
@@ -48,6 +52,32 @@ class PredictionResponse(BaseModel):
     threshold: float = Field(ge=0, le=1)
     threshold_policy: str
     feature_contract_version: str
+
+
+class DelayedLabelRequest(BaseModel):
+    """Ground truth sent later using the pseudonymous ID returned by inference."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["delayed-label-v1"]
+    feedback_id: UUID
+    label: StrictInt = Field(ge=0, le=1)
+    label_time: datetime
+
+    @field_validator("label_time")
+    @classmethod
+    def require_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("label_time must include a timezone")
+        if value.astimezone(UTC) > datetime.now(UTC) + timedelta(minutes=5):
+            raise ValueError("label_time cannot be more than five minutes in the future")
+        return value
+
+
+class DelayedLabelResponse(BaseModel):
+    schema_version: Literal["delayed-label-v1"] = DELAYED_LABEL_SCHEMA_VERSION
+    feedback_id: UUID
+    status: Literal["accepted", "duplicate"]
 
 
 class HealthResponse(BaseModel):

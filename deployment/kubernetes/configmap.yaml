@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: transaction-risk-api-config
+  namespace: transaction-risk
+data:
+  ENVIRONMENT: kind
+  LOG_LEVEL: INFO
+  MODEL_SOURCE: local
+  MODEL_NAME: transaction-risk-model
+  MODEL_VERSION: local
+  MODEL_ARTIFACT_PATH: /models/random_forest.joblib
+  MODEL_EVALUATION_REPORT_PATH: /models/evaluation_report.json
+  MAX_CONCURRENT_PREDICTIONS: "8"
+  PREDICTION_QUEUE_TIMEOUT_SECONDS: "0.05"
+  PREDICTION_TIMEOUT_SECONDS: "2.0"
+  API_AUTH_ENABLED: "false"
